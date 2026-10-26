@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agenda de citas</title><meta name="robots" content="noindex">
+<style>
+:root{--bg:#faf8f5;--card:#fff;--tx:#1f2328;--mut:#6b7280;--bd:#e7e2d9;--ac:#2f6f5e;--acs:#e3f0ec;--bad:#b4402f;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15181a;--card:#1e2224;--tx:#ecebe8;--mut:#9aa0a6;--bd:#2f3538;--ac:#6cc3ab;--acs:#1f332d;--bad:#e8806f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#15181a;--card:#1e2224;--tx:#ecebe8;--mut:#9aa0a6;--bd:#2f3538;--ac:#6cc3ab;--acs:#1f332d;--bad:#e8806f;color-scheme:dark}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#app{max-width:560px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0 0 12px}h2{font-size:16px;margin:16px 0 8px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sp{justify-content:space-between}
+button,select,input{font:inherit;color:inherit}
+button{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:8px 12px;cursor:pointer}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff}
+button.on{background:var(--acs);border-color:var(--ac);color:var(--ac);font-weight:600}
+button.d{color:var(--bad)}button:disabled{opacity:.4}
+input,select{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:8px;width:100%}
+.seg{display:flex;gap:6px}.seg button{flex:1}
+.mut{color:var(--mut);font-size:14px}
+.grid7{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cell{aspect-ratio:1;padding:2px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;border:1px solid transparent}
+.cell.has{background:var(--acs)}.cell.today{border-color:var(--ac)}.cell.off{opacity:.35}
+.cell b{font-size:11px;color:var(--ac)}
+.slots{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--bd)}
+.item:last-child{border:0}
+.free{color:var(--mut)}
+.dayrow{display:grid;grid-template-columns:44px 1fr 1fr;gap:6px;align-items:center;margin-bottom:8px}
+.tab{display:flex;gap:6px;margin-bottom:12px}.tab button{flex:1}
+.link{word-break:break-all;font-size:13px;background:var(--bg);border:1px dashed var(--bd);border-radius:10px;padding:8px;margin:8px 0}
+.ok{text-align:center;padding:24px 8px}.ok .big{font-size:40px}
+</style></head><body><div id="app"></div>
+<script>
+const DN=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'],MN=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const pad=n=>String(n).padStart(2,'0'),iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const parse=s=>{const[a,b,c]=s.split('-').map(Number);return new Date(a,b-1,c)};
+const add=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
+const mon=d=>add(new Date(d.getFullYear(),d.getMonth(),d.getDate()),-((d.getDay()+6)%7));
+const hm=m=>`${pad(Math.floor(m/60))}:${pad(m%60)}`,tm=s=>{const[a,b]=s.split(':').map(Number);return a*60+b};
+const $=id=>document.getElementById(id),app=$('app');
+const el=(h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let S={dur:45,weeks:{},bookings:[]},KEY=localStorage.getItem('akey')||'';
+async function api(p,o={}){
+  const r=await fetch('/api'+p,{...o,headers:{'Content-Type':'application/json',...(KEY?{Authorization:'Bearer '+KEY}:{})}});
+  const j=await r.json().catch(()=>({}));
+  if(r.status===401){KEY='';localStorage.removeItem('akey')}
+  if(!r.ok)throw Object.assign(new Error(j.error||'Error'),{status:r.status});
+  return j;
+}
+const load=async()=>{S={...S,...await api('/admin/state')}};
+function weekCfg(wk){
+  if(S.weeks[wk])return S.weeks[wk];
+  let prev=null;for(let i=1;i<=12&&!prev;i++)prev=S.weeks[iso(add(parse(wk),-7*i))];const d={};
+  for(let i=0;i<7;i++)d[i]=prev?{...prev.d[i]}:{on:i>=1&&i<=5,f:'09:00',t:'18:00'};
+  return {d};
+}
+function slotsFor(date){
+  const c=weekCfg(iso(mon(date))).d[date.getDay()];
+  if(!c||!c.on)return[];
+  const out=[],now=new Date();
+  for(let m=tm(c.f);m+S.dur<=tm(c.t);m+=S.dur){
+    const dt=new Date(date);dt.setHours(0,m,0,0);
+    if(dt>now)out.push(hm(m));
+  }
+  return out;
+}
+const bks=d=>S.bookings.filter(b=>b.date===iso(d)).sort((a,b)=>a.time<b.time?-1:1);
+
+/* ---------- CLIENTE ---------- */
+let cl={week:new URLSearchParams(location.search).get('s'),pub:null,day:null,time:null,done:null};
+async function client(){
+  if(cl.done){const d=parse(cl.done.date);app.innerHTML=`<div class="card ok"><div class="big">✅</div><h1>¡Cita confirmada!</h1><p>${esc(cl.done.name)}, te esperamos el <b>${DN[d.getDay()]} ${d.getDate()} de ${MN[d.getMonth()]}</b> a las <b>${cl.done.time}</b>.</p><p class="mut">Si no puedes asistir, avisa con tiempo.</p><button id="again">Agendar otra</button></div>`;
+    $('again').onclick=()=>{cl.done=null;cl.day=null;cl.time=null;client()};return}
+  try{cl.pub=await api('/public'+(cl.week?'?week='+cl.week:''))}catch(e){app.innerHTML='<div class="card mut">No se pudo cargar la agenda. Intenta de nuevo.</div>';return}
+  const wk=parse(cl.pub.week),days=Object.keys(cl.pub.days).filter(d=>cl.pub.days[d].length);
+  let html=`<h1>Reserva tu cita</h1><p class="mut">Semana del ${wk.getDate()} de ${MN[wk.getMonth()]}. Elige un día y una hora.</p>`;
+  if(!days.length)html+=`<div class="card mut">No hay horarios disponibles esta semana. Escríbele directamente para consultar.</div>`;
+  else{
+    html+=`<div class="card"><div class="row">${days.map(k=>{const d=parse(k);return `<button data-d="${k}" class="${cl.day===k?'on':''}">${DN[d.getDay()]} ${d.getDate()}</button>`}).join('')}</div></div>`;
+    if(cl.day&&cl.pub.days[cl.day])html+=`<div class="card"><div class="slots">${cl.pub.days[cl.day].map(t=>`<button data-t="${t}" class="${cl.time===t?'on':''}">${t}</button>`).join('')}</div></div>`;
+    if(cl.day&&cl.time)html+=`<div class="card"><h2 style="margin-top:0">Tus datos</h2><div class="row" style="flex-direction:column;align-items:stretch"><input id="nm" placeholder="Nombre" autocomplete="name"><input id="ph" type="tel" placeholder="WhatsApp / celular" autocomplete="tel"><button class="p" id="ok">Confirmar ${cl.time}</button><div class="mut" id="msg"></div></div></div>`;
+  }
+  app.innerHTML=html;
+  const redraw=()=>{const y=scrollY;client().then(()=>scrollTo(0,y))};
+  app.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{cl.day=b.dataset.d;cl.time=null;redraw()});
+  app.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{cl.time=b.dataset.t;redraw()});
+  if($('ok'))$('ok').onclick=async()=>{
+    const name=$('nm').value.trim(),phone=$('ph').value.trim();
+    if(!name||phone.length<7){$('msg').textContent='Escribe tu nombre y un celular válido.';return}
+    $('ok').disabled=true;
+    try{cl.done=await api('/book',{method:'POST',body:JSON.stringify({date:cl.day,time:cl.time,name,phone})});client()}
+    catch(e){alert(e.message);cl.time=null;client()}
+  };
+}
+
+/* ---------- BARBERO / ADMIN ---------- */
+let ad={tab:'agenda',view:'week',cur:new Date(),hwk:iso(mon(new Date()))};
+function admin(){
+  const tabs=`<div class="tab"><button data-tab="agenda" class="${ad.tab==='agenda'?'on':''}">📅 Agenda</button><button data-tab="horario" class="${ad.tab==='horario'?'on':''}">🕒 Horario y link</button></div>`;
+  app.innerHTML=`<h1>Mi agenda</h1>${tabs}<div id="body"></div>`;
+  app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ad.tab=b.dataset.tab;admin()});
+  ad.tab==='agenda'?agenda($('body')):horario($('body'));
+}
+function agenda(box){
+  const c=ad.cur,v=ad.view;
+  const title=v==='month'?`${MN[c.getMonth()]} ${c.getFullYear()}`:v==='week'?`Semana del ${mon(c).getDate()} ${MN[mon(c).getMonth()].slice(0,3)}`:`${DN[c.getDay()]} ${c.getDate()} ${MN[c.getMonth()].slice(0,3)}`;
+  let h=`<div class="seg" style="margin-bottom:10px">${[['month','Mes'],['week','Semana'],['day','Día']].map(([k,l])=>`<button data-v="${k}" class="${v===k?'on':''}">${l}</button>`).join('')}</div>
+  <div class="row sp" style="margin-bottom:10px"><button id="pv">‹</button><b>${title}</b><button id="nx">›</button></div>`;
+  if(v==='month'){
+    const f=new Date(c.getFullYear(),c.getMonth(),1),st=mon(f);
+    h+=`<div class="grid7 mut" style="text-align:center;margin-bottom:4px">${['L','M','M','J','V','S','D'].map(x=>`<span>${x}</span>`).join('')}</div><div class="grid7">`;
+    for(let i=0;i<42;i++){const d=add(st,i),n=bks(d).length;
+      h+=`<button class="cell ${n?'has':''} ${iso(d)===iso(new Date())?'today':''} ${d.getMonth()!==c.getMonth()?'off':''}" data-go="${iso(d)}">${d.getDate()}${n?`<b>${n}</b>`:''}</button>`}
+    h+='</div>';
+  }else if(v==='week'){
+    h+=`<div class="card">`+[...Array(7)].map((_,i)=>{const d=add(mon(c),i),L=bks(d);
+      return `<div class="item" data-go="${iso(d)}" style="cursor:pointer"><div><b>${DN[d.getDay()]} ${d.getDate()}</b><div class="mut">${L.length?L.map(b=>b.time+' '+esc(b.name)).join(' · '):(slotsFor(d).length?'Libre':'Sin atención')}</div></div><span class="mut">›</span></div>`}).join('')+`</div>`;
+  }else{
+    const L=bks(c),sl=slotsFor(c),times=[...new Set([...sl,...L.map(b=>b.time)])].sort();
+    h+=`<div class="card">`+(times.length?times.map(t=>{const b=L.find(x=>x.time===t);
+      return `<div class="item"><div><b>${t}</b> ${b?`<span> ${esc(b.name)}</span><div class="mut"><a href="https://wa.me/57${esc(b.phone.replace(/\D/g,''))}" target="_blank" rel="noopener">${esc(b.phone)}</a></div>`:'<span class="free">Libre</span>'}</div>${b?`<button class="d" data-del="${b.id}">Cancelar</button>`:''}</div>`}).join(''):'<div class="mut">Sin horario este día.</div>')+`</div>`;
+  }
+  box.innerHTML=h;
+  box.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{ad.view=b.dataset.v;admin()});
+  box.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ad.cur=parse(b.dataset.go);ad.view='day';admin()});
+  box.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{if(confirm('¿Cancelar esta cita?')){await api('/admin/booking/'+b.dataset.del,{method:'DELETE'});await load();admin()}});
+  const step=n=>{const x=new Date(c);v==='month'?x.setMonth(x.getMonth()+n):x.setDate(x.getDate()+n*(v==='week'?7:1));ad.cur=x;admin()};
+  $('pv').onclick=()=>step(-1);$('nx').onclick=()=>step(1);
+}
+function horario(box){
+  const wk=parse(ad.hwk),cfg=weekCfg(ad.hwk),link=location.origin+'/?s='+ad.hwk;
+  let h=`<div class="row sp" style="margin-bottom:10px"><button id="pw">‹</button><b>Semana del ${wk.getDate()} de ${MN[wk.getMonth()]}</b><button id="nw">›</button></div><div class="card">`;
+  for(let k=1;k<=7;k++){const i=k%7,c=cfg.d[i];
+    h+=`<div class="dayrow"><button data-on="${i}" class="${c.on?'on':''}">${DN[i]}</button><input type="time" data-f="${i}" value="${c.f}" ${c.on?'':'disabled'}><input type="time" data-t="${i}" value="${c.t}" ${c.on?'':'disabled'}></div>`}
+  h+=`<div class="row" style="margin-top:8px"><span class="mut">Duración por cita</span><select id="dur" style="width:auto">${[20,30,45,60,90].map(m=>`<option ${S.dur===m?'selected':''} value="${m}">${m} min</option>`).join('')}</select></div></div>
+  <div class="card"><b>Link de esta semana</b><div class="link">${esc(link)}</div><div class="row"><button class="p" id="cp">Copiar link</button><button id="wa">Enviar por WhatsApp</button></div><p class="mut" style="margin-bottom:0">Tus clientes solo verán los días y horas que dejaste activos. Las semanas nuevas copian el horario de la anterior.</p></div>`;
+  box.innerHTML=h;
+  const put=async()=>{S.weeks[ad.hwk]=cfg;await api('/admin/week/'+ad.hwk,{method:'PUT',body:JSON.stringify(cfg)})};
+  box.querySelectorAll('[data-on]').forEach(b=>b.onclick=async()=>{const c=cfg.d[b.dataset.on];c.on=!c.on;await put();horario(box)});
+  box.querySelectorAll('[data-f]').forEach(i=>i.onchange=()=>{cfg.d[i.dataset.f].f=i.value;put()});
+  box.querySelectorAll('[data-t]').forEach(i=>i.onchange=()=>{cfg.d[i.dataset.t].t=i.value;put()});
+  $('dur').onchange=async e=>{S.dur=+e.target.value;await api('/admin/dur',{method:'PUT',body:JSON.stringify({dur:S.dur})})};
+  $('pw').onclick=()=>{ad.hwk=iso(add(wk,-7));horario(box)};$('nw').onclick=()=>{ad.hwk=iso(add(wk,7));horario(box)};
+  $('cp').onclick=async()=>{try{await navigator.clipboard.writeText(link);$('cp').textContent='¡Copiado!'}catch(e){$('cp').textContent='Copia el texto de arriba'}};
+  $('wa').onclick=()=>window.open('https://wa.me/?text='+encodeURIComponent('Agenda tu cita aquí 👇\n'+link),'_blank','noopener');
+}
+
+(async()=>{
+  if(location.pathname!=='/admin'){client();return}
+  for(;;){
+    if(!KEY){KEY=prompt('Contraseña de administrador')||'';if(!KEY){app.innerHTML='<div class="card">Acceso requerido. Recarga la página.</div>';return}}
+    try{await load();break}catch(e){if(e.status!==401){app.innerHTML='<div class="card">Error de conexión.</div>';return}alert('Contraseña incorrecta')}
+  }
+  localStorage.setItem('akey',KEY);admin();
+})();
+</script></body></html>
