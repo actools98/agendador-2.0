@@ -2,13 +2,15 @@
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Agenda de citas</title><meta name="robots" content="noindex">
+<script>try{const t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 <style>
-:root{--bg:#faf8f5;--card:#fff;--tx:#1f2328;--mut:#6b7280;--bd:#e7e2d9;--ac:#2f6f5e;--acs:#e3f0ec;--bad:#b4402f;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+:root{--bg:#ffffff;--card:#fff;--tx:#1f2328;--mut:#5f6773;--bd:#dfe3e8;--ac:#2f6f5e;--acs:#e3f0ec;--bad:#b4402f;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15181a;--card:#1e2224;--tx:#ecebe8;--mut:#9aa0a6;--bd:#2f3538;--ac:#6cc3ab;--acs:#1f332d;--bad:#e8806f;color-scheme:dark}}
 :root[data-theme="dark"]{--bg:#15181a;--card:#1e2224;--tx:#ecebe8;--mut:#9aa0a6;--bd:#2f3538;--ac:#6cc3ab;--acs:#1f332d;--bad:#e8806f;color-scheme:dark}
 *{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
 body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-#app{max-width:560px;margin:0 auto;padding:16px}
+#app{max-width:560px;margin:0 auto;padding:52px 16px 16px}
+.tg{position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);right:12px;z-index:5;width:40px;height:40px;border-radius:50%;padding:0;font-size:18px;line-height:1}
 h1{font-size:20px;margin:0 0 12px}h2{font-size:16px;margin:16px 0 8px}
 .card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:12px}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sp{justify-content:space-between}
@@ -32,7 +34,7 @@ input,select{background:var(--card);border:1px solid var(--bd);border-radius:10p
 .tab{display:flex;gap:6px;margin-bottom:12px}.tab button{flex:1}
 .link{word-break:break-all;font-size:13px;background:var(--bg);border:1px dashed var(--bd);border-radius:10px;padding:8px;margin:8px 0}
 .ok{text-align:center;padding:24px 8px}.ok .big{font-size:40px}
-</style></head><body><div id="app"></div>
+</style></head><body><button class="tg" id="tg" aria-label="Cambiar entre modo día y noche"></button><div id="app"></div>
 <script>
 const DN=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'],MN=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const pad=n=>String(n).padStart(2,'0'),iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -73,7 +75,7 @@ const bks=d=>S.bookings.filter(b=>b.date===iso(d)).sort((a,b)=>a.time<b.time?-1:
 /* ---------- CLIENTE ---------- */
 let cl={week:new URLSearchParams(location.search).get('s'),pub:null,day:null,time:null,done:null};
 async function client(){
-  if(cl.done){const d=parse(cl.done.date);app.innerHTML=`<div class="card ok"><div class="big">✅</div><h1>¡Cita confirmada!</h1><p>${esc(cl.done.name)}, te esperamos el <b>${DN[d.getDay()]} ${d.getDate()} de ${MN[d.getMonth()]}</b> a las <b>${cl.done.time}</b>.</p><p class="mut">Si no puedes asistir, avisa con tiempo.</p><button id="again">Agendar otra</button></div>`;
+  if(cl.done){const d=parse(cl.done.date);app.innerHTML=`<div class="card ok"><div class="big">✅</div><h1>¡Cita confirmada!</h1><p>${esc(cl.done.name)}, te esperamos el <b>${DN[d.getDay()]} ${d.getDate()} de ${MN[d.getMonth()]}</b> a las <b>${cl.done.time}</b>.</p><p class="mut">${cl.done.mailed?`Te enviamos la confirmación a <b>${esc(cl.done.email)}</b>.`:'Tu cita quedó registrada, pero no pudimos enviar el correo de confirmación.'} Si no puedes asistir, avisa con tiempo.</p><button id="again">Agendar otra</button></div>`;
     $('again').onclick=()=>{cl.done=null;cl.day=null;cl.time=null;client()};return}
   try{cl.pub=await api('/public'+(cl.week?'?week='+cl.week:''))}catch(e){app.innerHTML='<div class="card mut">No se pudo cargar la agenda. Intenta de nuevo.</div>';return}
   const wk=parse(cl.pub.week),days=Object.keys(cl.pub.days).filter(d=>cl.pub.days[d].length);
@@ -82,17 +84,19 @@ async function client(){
   else{
     html+=`<div class="card"><div class="row">${days.map(k=>{const d=parse(k);return `<button data-d="${k}" class="${cl.day===k?'on':''}">${DN[d.getDay()]} ${d.getDate()}</button>`}).join('')}</div></div>`;
     if(cl.day&&cl.pub.days[cl.day])html+=`<div class="card"><div class="slots">${cl.pub.days[cl.day].map(t=>`<button data-t="${t}" class="${cl.time===t?'on':''}">${t}</button>`).join('')}</div></div>`;
-    if(cl.day&&cl.time)html+=`<div class="card"><h2 style="margin-top:0">Tus datos</h2><div class="row" style="flex-direction:column;align-items:stretch"><input id="nm" placeholder="Nombre" autocomplete="name"><input id="ph" type="tel" placeholder="WhatsApp / celular" autocomplete="tel"><button class="p" id="ok">Confirmar ${cl.time}</button><div class="mut" id="msg"></div></div></div>`;
+    if(cl.day&&cl.time)html+=`<div class="card"><h2 style="margin-top:0">Tus datos</h2><div class="row" style="flex-direction:column;align-items:stretch"><input id="nm" placeholder="Nombre" autocomplete="name"><input id="sv" placeholder="Servicio (ej. corte + barba, cejas, uñas acrílicas)" maxlength="100"><input id="em" type="email" placeholder="Correo electrónico (obligatorio)" autocomplete="email" required><input id="ph" type="tel" placeholder="WhatsApp / celular" autocomplete="tel"><button class="p" id="ok">Confirmar ${cl.time}</button><div class="mut" id="msg"></div></div></div>`;
   }
   app.innerHTML=html;
   const redraw=()=>{const y=scrollY;client().then(()=>scrollTo(0,y))};
   app.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{cl.day=b.dataset.d;cl.time=null;redraw()});
   app.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{cl.time=b.dataset.t;redraw()});
   if($('ok'))$('ok').onclick=async()=>{
-    const name=$('nm').value.trim(),phone=$('ph').value.trim();
+    const name=$('nm').value.trim(),service=$('sv').value.trim(),email=$('em').value.trim(),phone=$('ph').value.trim();
+    if(service.length<2){$('msg').textContent='Escribe el servicio que te vas a hacer.';return}
     if(!name||phone.length<7){$('msg').textContent='Escribe tu nombre y un celular válido.';return}
-    $('ok').disabled=true;
-    try{cl.done=await api('/book',{method:'POST',body:JSON.stringify({date:cl.day,time:cl.time,name,phone})});client()}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)){$('msg').textContent='Escribe un correo electrónico válido.';return}
+    $('ok').disabled=true;$('ok').textContent='Confirmando…';
+    try{cl.done=await api('/book',{method:'POST',body:JSON.stringify({date:cl.day,time:cl.time,name,service,phone,email})});client()}
     catch(e){alert(e.message);cl.time=null;client()}
   };
 }
@@ -118,11 +122,11 @@ function agenda(box){
     h+='</div>';
   }else if(v==='week'){
     h+=`<div class="card">`+[...Array(7)].map((_,i)=>{const d=add(mon(c),i),L=bks(d);
-      return `<div class="item" data-go="${iso(d)}" style="cursor:pointer"><div><b>${DN[d.getDay()]} ${d.getDate()}</b><div class="mut">${L.length?L.map(b=>b.time+' '+esc(b.name)).join(' · '):(slotsFor(d).length?'Libre':'Sin atención')}</div></div><span class="mut">›</span></div>`}).join('')+`</div>`;
+      return `<div class="item" data-go="${iso(d)}" style="cursor:pointer"><div><b>${DN[d.getDay()]} ${d.getDate()}</b><div class="mut">${L.length?L.map(b=>b.time+' '+esc(b.name)+(b.service?' ('+esc(b.service)+')':'')).join(' · '):(slotsFor(d).length?'Libre':'Sin atención')}</div></div><span class="mut">›</span></div>`}).join('')+`</div>`;
   }else{
     const L=bks(c),sl=slotsFor(c),times=[...new Set([...sl,...L.map(b=>b.time)])].sort();
     h+=`<div class="card">`+(times.length?times.map(t=>{const b=L.find(x=>x.time===t);
-      return `<div class="item"><div><b>${t}</b> ${b?`<span> ${esc(b.name)}</span><div class="mut"><a href="https://wa.me/57${esc(b.phone.replace(/\D/g,''))}" target="_blank" rel="noopener">${esc(b.phone)}</a></div>`:'<span class="free">Libre</span>'}</div>${b?`<button class="d" data-del="${b.id}">Cancelar</button>`:''}</div>`}).join(''):'<div class="mut">Sin horario este día.</div>')+`</div>`;
+      return `<div class="item"><div><b>${t}</b> ${b?`<span> ${esc(b.name)}</span>${b.service?`<div>✂️ ${esc(b.service)}</div>`:''}<div class="mut"><a href="https://wa.me/57${esc(b.phone.replace(/\D/g,''))}" target="_blank" rel="noopener">${esc(b.phone)}</a>${b.email?' · '+esc(b.email):''}</div>`:'<span class="free">Libre</span>'}</div>${b?`<button class="d" data-del="${b.id}">Cancelar</button>`:''}</div>`}).join(''):'<div class="mut">Sin horario este día.</div>')+`</div>`;
   }
   box.innerHTML=h;
   box.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{ad.view=b.dataset.v;admin()});
@@ -149,6 +153,10 @@ function horario(box){
   $('wa').onclick=()=>window.open('https://wa.me/?text='+encodeURIComponent('Agenda tu cita aquí 👇\n'+link),'_blank','noopener');
 }
 
+const isDark=()=>(document.documentElement.dataset.theme||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'))==='dark';
+const paintTg=()=>{$('tg').textContent=isDark()?'☀️':'🌙';$('tg').title=isDark()?'Modo día':'Modo noche'};
+$('tg').onclick=()=>{const t=isDark()?'light':'dark';document.documentElement.dataset.theme=t;try{localStorage.setItem('theme',t)}catch(e){}paintTg()};
+paintTg();
 (async()=>{
   if(location.pathname!=='/admin'){client();return}
   for(;;){
