@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +23,39 @@ db.exec(`
     name TEXT NOT NULL, phone TEXT NOT NULL,
     created TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(date, time));
 `);
+
+if (!db.prepare('PRAGMA table_info(bookings)').all().some(c => c.name === 'email'))
+  db.exec('ALTER TABLE bookings ADD COLUMN email TEXT');
+if (!db.prepare('PRAGMA table_info(bookings)').all().some(c => c.name === 'service'))
+  db.exec('ALTER TABLE bookings ADD COLUMN service TEXT');
+
+/* ---- correo (SMTP) ---- */
+const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM } = process.env;
+const BUSINESS = process.env.BUSINESS_NAME || 'Agenda de citas';
+const port = Number(SMTP_PORT) || 465;
+const mailer = SMTP_HOST ? nodemailer.createTransport({
+  host: SMTP_HOST, port, secure: port === 465,
+  auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASS } : undefined,
+  connectionTimeout: 8000, greetingTimeout: 8000, socketTimeout: 10000
+}) : null;
+if (!mailer) console.warn('SMTP_HOST no configurado: no se enviarán correos de confirmación');
+const DIAS = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+async function sendConfirmation(b) {
+  if (!mailer) return false;
+  const d = new Date(b.date + 'T00:00:00Z');
+  const cuando = `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]} a las ${b.time}`;
+  try {
+    await mailer.sendMail({
+      from: MAIL_FROM || SMTP_USER, to: b.email,
+      subject: `Cita confirmada: ${cuando}`,
+      text: `Hola ${b.name}, tu cita quedó confirmada para el ${cuando}.\nServicio: ${b.service}\n\nSi no puedes asistir, avísanos con tiempo.\n\n${BUSINESS}`,
+      html: `<div style="font-family:system-ui,sans-serif;max-width:480px"><h2>¡Cita confirmada!</h2><p>Hola ${esc(b.name)}, te esperamos el <b>${esc(cuando)}</b>.</p><p>Servicio: <b>${esc(b.service)}</b></p><p style="color:#666">Si no puedes asistir, avísanos con tiempo.</p><p>${esc(BUSINESS)}</p></div>`
+    });
+    return true;
+  } catch (e) { console.error('Falló el envío de correo:', e.message); return false; }
+}
 
 /* ---- fechas (Colombia = UTC-5, sin horario de verano) ---- */
 const toIso = d => d.toISOString().slice(0, 10);
@@ -82,23 +116,26 @@ app.get('/api/public', (req, res) => {
 });
 
 // Público: reservar
-app.post('/api/book', limit, (req, res) => {
-  const { date, time, name, phone } = req.body || {};
+app.post('/api/book', limit, async (req, res) => {
+  const { date, time, name, phone, email, service } = req.body || {};
+  const sv = String(service || '').trim().slice(0, 100);
+  const em = String(email || '').trim().toLowerCase().slice(0, 120);
   const n = String(name || '').trim().slice(0, 60), p = String(phone || '').replace(/[^\d+]/g, '').slice(0, 20);
-  if (!DATE.test(date) || !/^\d{2}:\d{2}$/.test(time) || n.length < 2 || p.length < 7)
+  if (!DATE.test(date) || !/^\d{2}:\d{2}$/.test(time) || n.length < 2 || sv.length < 2 || p.length < 7 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em))
     return res.status(400).json({ error: 'Datos inválidos' });
   if (!slotsFor(date).includes(time)) return res.status(409).json({ error: 'Esa hora ya no está disponible' });
   try {
-    db.prepare('INSERT INTO bookings(id,date,time,name,phone) VALUES(?,?,?,?,?)')
-      .run(crypto.randomUUID(), date, time, n, p);
+    db.prepare('INSERT INTO bookings(id,date,time,name,phone,email,service) VALUES(?,?,?,?,?,?,?)')
+      .run(crypto.randomUUID(), date, time, n, p, em, sv);
   } catch { return res.status(409).json({ error: 'Esa hora acaba de ser tomada' }); }
-  res.json({ ok: true, date, time, name: n });
+  const mailed = await sendConfirmation({ date, time, name: n, email: em, service: sv });
+  res.json({ ok: true, date, time, name: n, email: em, service: sv, mailed });
 });
 
 // Admin
 app.get('/api/admin/state', auth, (req, res) => {
   const weeks = {}; for (const r of db.prepare('SELECT wk,cfg FROM weeks').all()) weeks[r.wk] = JSON.parse(r.cfg);
-  res.json({ dur: getDur(), weeks, bookings: db.prepare('SELECT id,date,time,name,phone FROM bookings ORDER BY date,time').all() });
+  res.json({ dur: getDur(), weeks, bookings: db.prepare('SELECT id,date,time,name,phone,email,service FROM bookings ORDER BY date,time').all() });
 });
 app.put('/api/admin/week/:wk', auth, (req, res) => {
   const wk = req.params.wk, cfg = req.body;
