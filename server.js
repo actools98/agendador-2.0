@@ -1,0 +1,123 @@
+import express from 'express';
+import Database from 'better-sqlite3';
+import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DATA = process.env.DATA_DIR || path.join(__dirname, 'data');
+const ADMIN = process.env.ADMIN_PASSWORD;
+const PORT = process.env.PORT || 3000;
+if (!ADMIN) { console.error('Falta la variable ADMIN_PASSWORD'); process.exit(1); }
+
+fs.mkdirSync(DATA, { recursive: true });
+const db = new Database(path.join(DATA, 'agenda.db'));
+db.pragma('journal_mode = WAL');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
+  CREATE TABLE IF NOT EXISTS weeks(wk TEXT PRIMARY KEY, cfg TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS bookings(
+    id TEXT PRIMARY KEY, date TEXT NOT NULL, time TEXT NOT NULL,
+    name TEXT NOT NULL, phone TEXT NOT NULL,
+    created TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(date, time));
+`);
+
+/* ---- fechas (Colombia = UTC-5, sin horario de verano) ---- */
+const toIso = d => d.toISOString().slice(0, 10);
+const D = s => new Date(s + 'T00:00:00Z');
+const addD = (s, n) => { const d = D(s); d.setUTCDate(d.getUTCDate() + n); return toIso(d); };
+const monday = s => addD(s, -((D(s).getUTCDay() + 6) % 7));
+const nowCO = () => new Date(Date.now() - 5 * 3600e3);
+const tm = s => { const [a, b] = s.split(':').map(Number); return a * 60 + b; };
+const hm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+
+const getDur = () => Number(db.prepare("SELECT v FROM settings WHERE k='dur'").get()?.v) || 45;
+function weekCfg(wk) {
+  const q = db.prepare('SELECT cfg FROM weeks WHERE wk=?');
+  for (let i = 0; i <= 12; i++) { const r = q.get(addD(wk, -7 * i)); if (r) return JSON.parse(r.cfg); }
+  const d = {}; for (let i = 0; i < 7; i++) d[i] = { on: i >= 1 && i <= 5, f: '09:00', t: '18:00' };
+  return { d };
+}
+function slotsFor(date) {
+  const c = weekCfg(monday(date)).d[D(date).getUTCDay()];
+  if (!c || !c.on) return [];
+  const n = nowCO(), today = toIso(n), nowM = n.getUTCHours() * 60 + n.getUTCMinutes(), dur = getDur(), out = [];
+  if (date < today) return [];
+  for (let m = tm(c.f); m + dur <= tm(c.t); m += dur) {
+    if (date === today && m <= nowM) continue;
+    out.push(hm(m));
+  }
+  return out;
+}
+
+/* ---- app ---- */
+const app = express();
+app.set('trust proxy', 1);
+app.use(express.json({ limit: '20kb' }));
+
+const auth = (req, res, next) => {
+  const a = Buffer.from((req.headers.authorization || '').replace('Bearer ', '')), b = Buffer.from(ADMIN);
+  if (a.length === b.length && crypto.timingSafeEqual(a, b)) return next();
+  res.status(401).json({ error: 'No autorizado' });
+};
+const hits = new Map(); // límite simple: 10 reservas por IP por hora
+const limit = (req, res, next) => {
+  const k = req.ip, now = Date.now(), arr = (hits.get(k) || []).filter(t => now - t < 3600e3);
+  if (arr.length >= 10) return res.status(429).json({ error: 'Demasiados intentos, prueba más tarde' });
+  arr.push(now); hits.set(k, arr); next();
+};
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Público: horas libres de una semana (sin datos de otros clientes)
+app.get('/api/public', (req, res) => {
+  const wk = monday(DATE.test(req.query.week) ? req.query.week : toIso(nowCO()));
+  const taken = db.prepare('SELECT date,time FROM bookings WHERE date BETWEEN ? AND ?').all(wk, addD(wk, 6));
+  const days = {};
+  for (let i = 0; i < 7; i++) {
+    const d = addD(wk, i);
+    days[d] = slotsFor(d).filter(t => !taken.some(x => x.date === d && x.time === t));
+  }
+  res.json({ week: wk, dur: getDur(), days });
+});
+
+// Público: reservar
+app.post('/api/book', limit, (req, res) => {
+  const { date, time, name, phone } = req.body || {};
+  const n = String(name || '').trim().slice(0, 60), p = String(phone || '').replace(/[^\d+]/g, '').slice(0, 20);
+  if (!DATE.test(date) || !/^\d{2}:\d{2}$/.test(time) || n.length < 2 || p.length < 7)
+    return res.status(400).json({ error: 'Datos inválidos' });
+  if (!slotsFor(date).includes(time)) return res.status(409).json({ error: 'Esa hora ya no está disponible' });
+  try {
+    db.prepare('INSERT INTO bookings(id,date,time,name,phone) VALUES(?,?,?,?,?)')
+      .run(crypto.randomUUID(), date, time, n, p);
+  } catch { return res.status(409).json({ error: 'Esa hora acaba de ser tomada' }); }
+  res.json({ ok: true, date, time, name: n });
+});
+
+// Admin
+app.get('/api/admin/state', auth, (req, res) => {
+  const weeks = {}; for (const r of db.prepare('SELECT wk,cfg FROM weeks').all()) weeks[r.wk] = JSON.parse(r.cfg);
+  res.json({ dur: getDur(), weeks, bookings: db.prepare('SELECT id,date,time,name,phone FROM bookings ORDER BY date,time').all() });
+});
+app.put('/api/admin/week/:wk', auth, (req, res) => {
+  const wk = req.params.wk, cfg = req.body;
+  if (!DATE.test(wk) || monday(wk) !== wk || !cfg?.d) return res.status(400).json({ error: 'Semana inválida' });
+  db.prepare('INSERT INTO weeks(wk,cfg) VALUES(?,?) ON CONFLICT(wk) DO UPDATE SET cfg=excluded.cfg').run(wk, JSON.stringify({ d: cfg.d }));
+  res.json({ ok: true });
+});
+app.put('/api/admin/dur', auth, (req, res) => {
+  const v = Number(req.body?.dur);
+  if (![15, 20, 30, 45, 60, 90, 120].includes(v)) return res.status(400).json({ error: 'Duración inválida' });
+  db.prepare("INSERT INTO settings(k,v) VALUES('dur',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(String(v));
+  res.json({ ok: true });
+});
+app.delete('/api/admin/booking/:id', auth, (req, res) => {
+  db.prepare('DELETE FROM bookings WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/health', (_, res) => res.send('ok'));
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/admin', (_, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.listen(PORT, () => console.log('Agendador en puerto ' + PORT));
