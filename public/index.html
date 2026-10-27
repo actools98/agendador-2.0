@@ -108,13 +108,14 @@ let ad={tab:'agenda',view:'week',cur:new Date(),hwk:iso(mon(new Date()))};
 function admin(){
   const tabs=`<div class="tab"><button data-tab="agenda" class="${ad.tab==='agenda'?'on':''}">📅 Agenda</button><button data-tab="horario" class="${ad.tab==='horario'?'on':''}">🕒 Horario y link</button></div>`;
   app.innerHTML=`<h1>${esc(CFG.icon)} ${esc(CFG.name||'Mi agenda')}</h1>${tabs}<div id="body"></div>`;
-  app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ad.tab=b.dataset.tab;ad.form=null;admin()});
+  app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ad.tab=b.dataset.tab;ad.form=null;ad.newForm=false;admin()});
   ad.tab==='agenda'?agenda($('body')):horario($('body'));
 }
 function agenda(box){
   const c=ad.cur,v=ad.view;
   const title=v==='month'?`${MN[c.getMonth()]} ${c.getFullYear()}`:v==='week'?`Semana del ${mon(c).getDate()} ${MN[mon(c).getMonth()].slice(0,3)}`:`${DN[c.getDay()]} ${c.getDate()} ${MN[c.getMonth()].slice(0,3)}`;
-  let h=`<div class="seg" style="margin-bottom:10px">${[['month','Mes'],['week','Semana'],['day','Día']].map(([k,l])=>`<button data-v="${k}" class="${v===k?'on':''}">${l}</button>`).join('')}</div>
+  const freeOpts=ds=>{if(!ds)return'<option value="">Elige una fecha</option>';const taken=S.bookings.filter(b=>b.date===ds).map(b=>b.time),f=slotsFor(parse(ds),true).filter(t=>!taken.includes(t));return f.length?f.map(t=>`<option>${t}</option>`).join(''):'<option value="">Sin horas libres ese día</option>'};
+  let h=(ad.newForm?`<div class="card" id="nf"><b>Nueva cita</b><div class="row" style="flex-direction:column;align-items:stretch;margin-top:8px"><input id="nd" type="date" value="${ad.nd||''}"><select id="nt">${freeOpts(ad.nd)}</select><input id="nn" placeholder="Nombre del cliente"><input id="ns" placeholder="Servicio (opcional)" maxlength="100"><input id="np" type="tel" placeholder="Celular (opcional)"><div class="row"><button class="p" id="nsave">Guardar</button><button id="ncancel">Cancelar</button></div></div></div>`:`<button class="p" id="nueva" style="width:100%;margin-bottom:10px">＋ Nueva cita</button>`)+`<div class="seg" style="margin-bottom:10px">${[['month','Mes'],['week','Semana'],['day','Día']].map(([k,l])=>`<button data-v="${k}" class="${v===k?'on':''}">${l}</button>`).join('')}</div>
   <div class="row sp" style="margin-bottom:10px"><button id="pv">‹</button><b>${title}</b><button id="nx">›</button></div>`;
   if(v==='month'){
     const f=new Date(c.getFullYear(),c.getMonth(),1),st=mon(f);
@@ -143,6 +144,16 @@ function agenda(box){
   box.querySelectorAll('[data-blk]').forEach(b=>b.onclick=()=>addB(b.dataset.blk,{block:true}));
   const step=n=>{const x=new Date(c);v==='month'?x.setMonth(x.getMonth()+n):x.setDate(x.getDate()+n*(v==='week'?7:1));ad.cur=x;ad.form=null;admin()};
   $('pv').onclick=()=>step(-1);$('nx').onclick=()=>step(1);
+  if($('nueva'))$('nueva').onclick=()=>{ad.newForm=true;ad.nd=iso(ad.cur);admin()};
+  if($('ncancel'))$('ncancel').onclick=()=>{ad.newForm=false;admin()};
+  if($('nd'))$('nd').onchange=e=>{ad.nd=e.target.value;$('nt').innerHTML=freeOpts(ad.nd)};
+  if($('nsave'))$('nsave').onclick=async()=>{
+    const name=$('nn').value.trim(),time=$('nt').value;
+    if(name.length<2){alert('Escribe el nombre del cliente');return}
+    if(!ad.nd||!time){alert('Elige una fecha y una hora libre');return}
+    try{await api('/admin/booking',{method:'POST',body:JSON.stringify({date:ad.nd,time,name,service:$('ns').value.trim(),phone:$('np').value.trim()})});
+      ad.newForm=false;ad.cur=parse(ad.nd);ad.view='day';await load();admin()}catch(e){alert(e.message)}
+  };
 }
 function horario(box){
   const wk=parse(ad.hwk),cfg=weekCfg(ad.hwk),link=location.origin+'/?s='+ad.hwk;
