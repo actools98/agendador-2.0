@@ -32,6 +32,11 @@ if (!db.prepare('PRAGMA table_info(bookings)').all().some(c => c.name === 'servi
 /* ---- correo (SMTP) ---- */
 const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM } = process.env;
 const BUSINESS = process.env.BUSINESS_NAME || 'Agenda de citas';
+// Teléfono del negocio que se muestra en los correos (BUSINESS_PHONE, ej. "300 123 4567")
+const PHONE = (process.env.BUSINESS_PHONE || '').trim();
+const phoneDigits = PHONE.replace(/\D/g, '');
+const waLink = phoneDigits ? `https://wa.me/${phoneDigits.length === 10 ? '57' + phoneDigits : phoneDigits}` : '';
+const AUTO = 'Este correo fue enviado automáticamente. Por favor, no respondas a este mensaje.';
 const port = Number(SMTP_PORT) || 465;
 const mailer = SMTP_HOST ? nodemailer.createTransport({
   host: SMTP_HOST, port, secure: port === 465,
@@ -50,8 +55,8 @@ async function sendConfirmation(b) {
     await mailer.sendMail({
       from: MAIL_FROM || SMTP_USER, to: b.email,
       subject: `Cita confirmada: ${cuando}`,
-      text: `Hola ${b.name}, tu cita quedó confirmada para el ${cuando}.\nServicio: ${b.service}\n\nSi no puedes asistir, avísanos con tiempo.\n\n${BUSINESS}`,
-      html: `<div style="font-family:system-ui,sans-serif;max-width:480px"><h2>¡Cita confirmada!</h2><p>Hola ${esc(b.name)}, te esperamos el <b>${esc(cuando)}</b>.</p><p>Servicio: <b>${esc(b.service)}</b></p><p style="color:#666">Si no puedes asistir, avísanos con tiempo.</p><p>${esc(BUSINESS)}</p></div>`
+      text: `Hola ${b.name}, tu cita quedó confirmada para el ${cuando}.\nServicio: ${b.service}\n\nSi no puedes asistir, avísanos con tiempo.\n\n${BUSINESS}${PHONE ? `\n¿Dudas? Comunícate al ${PHONE}` : ''}\n\n${AUTO}`,
+      html: `<div style="font-family:system-ui,sans-serif;max-width:480px"><h2>¡Cita confirmada!</h2><p>Hola ${esc(b.name)}, te esperamos el <b>${esc(cuando)}</b>.</p><p>Servicio: <b>${esc(b.service)}</b></p><p style="color:#666">Si no puedes asistir, avísanos con tiempo.</p><p style="margin:16px 0 0"><b>${esc(BUSINESS)}</b>${PHONE ? `<br>¿Dudas? Comunícate al <a href="${waLink}">${esc(PHONE)}</a>` : ''}</p><p style="color:#888;font-size:12px;margin-top:16px">${AUTO}</p></div>`
     });
     return true;
   } catch (e) { console.error('Falló el envío de correo:', e.message); return false; }
@@ -65,7 +70,7 @@ async function notifyOwner(b) {
   const cuando = `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]} a las ${b.time}`;
   try {
     await mailer.sendMail({
-      from: MAIL_FROM || SMTP_USER, to, replyTo: b.email,
+      from: MAIL_FROM || SMTP_USER, to,
       subject: `Nueva cita: ${b.name} - ${cuando}`,
       text: `Nueva cita\n${cuando}\nCliente: ${b.name}\nServicio: ${b.service}\nCelular: ${b.phone}\nCorreo: ${b.email}`,
       html: `<div style="font-family:system-ui,sans-serif;max-width:480px"><h2>Nueva cita</h2><p><b>${esc(cuando)}</b></p><p>Cliente: <b>${esc(b.name)}</b><br>Servicio: ${esc(b.service)}<br>Celular: <a href="https://wa.me/57${esc(String(b.phone).replace(/\D/g, ''))}">${esc(b.phone)}</a><br>Correo: ${esc(b.email)}</p></div>`
@@ -122,7 +127,10 @@ const limit = (req, res, next) => {
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Público: nombre del negocio e icono del servicio
-app.get('/api/config', (_, res) => res.json({ name: process.env.BUSINESS_NAME || '', icon: process.env.SERVICE_ICON || '✂️' }));
+// SERVICE_ICON: un emoji. Sin definir = ✂️. Escribe "none" (o deja el valor vacío) para no mostrar ningún icono.
+const rawIcon = (process.env.SERVICE_ICON ?? '✂️').trim();
+const ICON = ['none', 'ninguno', '-'].includes(rawIcon.toLowerCase()) ? '' : rawIcon;
+app.get('/api/config', (_, res) => res.json({ name: process.env.BUSINESS_NAME || '', icon: ICON }));
 
 // Público: horas libres de una semana (sin datos de otros clientes)
 app.get('/api/public', (req, res) => {
