@@ -57,6 +57,22 @@ async function sendConfirmation(b) {
   } catch (e) { console.error('Falló el envío de correo:', e.message); return false; }
 }
 
+// Aviso al profesional cuando alguien reserva (NOTIFY_EMAIL, o el mismo buzón SMTP_USER)
+async function notifyOwner(b) {
+  const to = process.env.NOTIFY_EMAIL || SMTP_USER;
+  if (!mailer || !to) return;
+  const d = new Date(b.date + 'T00:00:00Z');
+  const cuando = `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]} a las ${b.time}`;
+  try {
+    await mailer.sendMail({
+      from: MAIL_FROM || SMTP_USER, to, replyTo: b.email,
+      subject: `Nueva cita: ${b.name} - ${cuando}`,
+      text: `Nueva cita\n${cuando}\nCliente: ${b.name}\nServicio: ${b.service}\nCelular: ${b.phone}\nCorreo: ${b.email}`,
+      html: `<div style="font-family:system-ui,sans-serif;max-width:480px"><h2>Nueva cita</h2><p><b>${esc(cuando)}</b></p><p>Cliente: <b>${esc(b.name)}</b><br>Servicio: ${esc(b.service)}<br>Celular: <a href="https://wa.me/57${esc(String(b.phone).replace(/\D/g, ''))}">${esc(b.phone)}</a><br>Correo: ${esc(b.email)}</p></div>`
+    });
+  } catch (e) { console.error('Falló el aviso al profesional:', e.message); }
+}
+
 /* ---- fechas (Colombia = UTC-5, sin horario de verano) ---- */
 const toIso = d => d.toISOString().slice(0, 10);
 const D = s => new Date(s + 'T00:00:00Z');
@@ -71,15 +87,17 @@ function weekCfg(wk) {
   const q = db.prepare('SELECT cfg FROM weeks WHERE wk=?');
   for (let i = 0; i <= 12; i++) { const r = q.get(addD(wk, -7 * i)); if (r) return JSON.parse(r.cfg); }
   const d = {}; for (let i = 0; i < 7; i++) d[i] = { on: i >= 1 && i <= 5, f: '09:00', t: '18:00' };
-  return { d };
+  return { d, br: { on: false, f: '13:00', t: '14:00' } };
 }
-function slotsFor(date) {
-  const c = weekCfg(monday(date)).d[D(date).getUTCDay()];
+// all=true: incluye horas ya pasadas (el administrador puede registrar a alguien que ya llegó)
+function slotsFor(date, all = false) {
+  const cfg = weekCfg(monday(date)), c = cfg.d[D(date).getUTCDay()], br = cfg.br?.on ? cfg.br : null;
   if (!c || !c.on) return [];
   const n = nowCO(), today = toIso(n), nowM = n.getUTCHours() * 60 + n.getUTCMinutes(), dur = getDur(), out = [];
-  if (date < today) return [];
+  if (!all && date < today) return [];
   for (let m = tm(c.f); m + dur <= tm(c.t); m += dur) {
-    if (date === today && m <= nowM) continue;
+    if (br && m < tm(br.t) && m + dur > tm(br.f)) continue; // cae en el descanso
+    if (!all && date === today && m <= nowM) continue;
     out.push(hm(m));
   }
   return out;
@@ -102,6 +120,9 @@ const limit = (req, res, next) => {
   arr.push(now); hits.set(k, arr); next();
 };
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Público: nombre del negocio e icono del servicio
+app.get('/api/config', (_, res) => res.json({ name: process.env.BUSINESS_NAME || '', icon: process.env.SERVICE_ICON || '✂️' }));
 
 // Público: horas libres de una semana (sin datos de otros clientes)
 app.get('/api/public', (req, res) => {
@@ -128,6 +149,7 @@ app.post('/api/book', limit, async (req, res) => {
     db.prepare('INSERT INTO bookings(id,date,time,name,phone,email,service) VALUES(?,?,?,?,?,?,?)')
       .run(crypto.randomUUID(), date, time, n, p, em, sv);
   } catch { return res.status(409).json({ error: 'Esa hora acaba de ser tomada' }); }
+  notifyOwner({ date, time, name: n, email: em, service: sv, phone: p });
   const mailed = await sendConfirmation({ date, time, name: n, email: em, service: sv });
   res.json({ ok: true, date, time, name: n, email: em, service: sv, mailed });
 });
@@ -140,13 +162,27 @@ app.get('/api/admin/state', auth, (req, res) => {
 app.put('/api/admin/week/:wk', auth, (req, res) => {
   const wk = req.params.wk, cfg = req.body;
   if (!DATE.test(wk) || monday(wk) !== wk || !cfg?.d) return res.status(400).json({ error: 'Semana inválida' });
-  db.prepare('INSERT INTO weeks(wk,cfg) VALUES(?,?) ON CONFLICT(wk) DO UPDATE SET cfg=excluded.cfg').run(wk, JSON.stringify({ d: cfg.d }));
+  const T = /^\d{2}:\d{2}$/, b = cfg.br;
+  const br = b && T.test(b.f) && T.test(b.t) ? { on: !!b.on, f: b.f, t: b.t } : { on: false, f: '13:00', t: '14:00' };
+  db.prepare('INSERT INTO weeks(wk,cfg) VALUES(?,?) ON CONFLICT(wk) DO UPDATE SET cfg=excluded.cfg').run(wk, JSON.stringify({ d: cfg.d, br }));
   res.json({ ok: true });
 });
 app.put('/api/admin/dur', auth, (req, res) => {
   const v = Number(req.body?.dur);
   if (![15, 20, 30, 45, 60, 90, 120].includes(v)) return res.status(400).json({ error: 'Duración inválida' });
   db.prepare("INSERT INTO settings(k,v) VALUES('dur',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(String(v));
+  res.json({ ok: true });
+});
+// Admin: agendar a mano (clientes de WhatsApp o sin cita) o bloquear una hora
+app.post('/api/admin/booking', auth, (req, res) => {
+  const { date, time, name, service, phone, block } = req.body || {};
+  const n = block ? '⛔ Bloqueado' : String(name || '').trim().slice(0, 60);
+  if (!DATE.test(date) || !/^\d{2}:\d{2}$/.test(time) || n.length < 2) return res.status(400).json({ error: 'Datos inválidos' });
+  if (!slotsFor(date, true).includes(time)) return res.status(409).json({ error: 'Esa hora no está en tu horario' });
+  try {
+    db.prepare('INSERT INTO bookings(id,date,time,name,phone,email,service) VALUES(?,?,?,?,?,?,?)')
+      .run(crypto.randomUUID(), date, time, n, block ? '' : String(phone || '').replace(/[^\d+]/g, '').slice(0, 20), '', block ? '' : String(service || '').trim().slice(0, 100));
+  } catch { return res.status(409).json({ error: 'Esa hora ya está ocupada' }); }
   res.json({ ok: true });
 });
 app.delete('/api/admin/booking/:id', auth, (req, res) => {
