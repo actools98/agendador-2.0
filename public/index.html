@@ -30,11 +30,13 @@ input,select{background:var(--card);border:1px solid var(--bd);border-radius:10p
 .item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--bd)}
 .item:last-child{border:0}
 .free{color:var(--mut)}
-.dayrow{display:grid;grid-template-columns:44px 1fr 1fr;gap:6px;align-items:center;margin-bottom:8px}.dayrow.br{grid-template-columns:112px 1fr 1fr}
+.dayrow{display:grid;grid-template-columns:60px 1fr 1fr;gap:6px;align-items:center;margin-bottom:8px}.dayrow.br{grid-template-columns:104px 1fr 1fr}
+.dayrow>*{min-width:0;width:100%}.dayrow button{padding:8px 0;text-align:center}.dayrow:not(.br) button{white-space:nowrap}.dayrow input{padding:8px 6px;font-size:15px}
+.pw{text-align:center;color:var(--mut);font-size:12px;padding:8px 0 24px}
 .tab{display:flex;gap:6px;margin-bottom:12px}.tab button{flex:1}
 .link{word-break:break-all;font-size:13px;background:var(--bg);border:1px dashed var(--bd);border-radius:10px;padding:8px;margin:8px 0}
 .ok{text-align:center;padding:24px 8px}.ok .big{font-size:40px}
-</style></head><body><button class="tg" id="tg" aria-label="Cambiar entre modo día y noche"></button><div id="app"></div>
+</style></head><body><button class="tg" id="tg" aria-label="Cambiar entre modo día y noche"></button><div id="app"></div><div class="pw">Powered by actols</div>
 <script>
 const DN=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'],MN=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const pad=n=>String(n).padStart(2,'0'),iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -86,7 +88,7 @@ async function client(){
   else{
     html+=`<div class="card">`+[all.slice(0,7),all.slice(7)].map(wk=>{const ds=wk.filter(k=>days.includes(k));if(!ds.length)return'';const f=parse(wk[0]);return `<div class="mut" style="margin:4px 0 6px">Semana del ${f.getDate()} de ${MN[f.getMonth()]}</div><div class="row" style="margin-bottom:10px">${ds.map(k=>{const d=parse(k);return `<button data-d="${k}" class="${cl.day===k?'on':''}">${DN[d.getDay()]} ${d.getDate()}</button>`}).join('')}</div>`}).join('')+`</div>`;
     if(cl.day&&cl.pub.days[cl.day])html+=`<div class="card"><div class="slots">${cl.pub.days[cl.day].map(t=>`<button data-t="${t}" class="${cl.time===t?'on':''}">${t}</button>`).join('')}</div></div>`;
-    if(cl.day&&cl.time)html+=`<div class="card"><h2 style="margin-top:0">Tus datos</h2><div class="row" style="flex-direction:column;align-items:stretch"><input id="nm" placeholder="Nombre" autocomplete="name"><input id="sv" placeholder="Servicio (ej. semi, uñas acrílicas)" maxlength="100"><input id="em" type="email" placeholder="Correo electrónico (obligatorio)" autocomplete="email" required><input id="ph" type="tel" placeholder="WhatsApp / celular" autocomplete="tel"><button class="p" id="ok">Confirmar ${cl.time}</button><div class="mut" id="msg"></div></div></div>`;
+    if(cl.day&&cl.time)html+=`<div class="card"><h2 style="margin-top:0">Tus datos</h2><div class="row" style="flex-direction:column;align-items:stretch"><input id="nm" placeholder="Nombre" autocomplete="name"><input id="sv" placeholder="Servicio (ej. corte + barba, cejas, uñas acrílicas)" maxlength="100"><input id="em" type="email" placeholder="Correo electrónico (obligatorio)" autocomplete="email" required><input id="ph" type="tel" placeholder="WhatsApp / celular" autocomplete="tel"><button class="p" id="ok">Confirmar ${cl.time}</button><div class="mut" id="msg"></div></div></div>`;
   }
   app.innerHTML=html;
   const redraw=()=>{const y=scrollY;client().then(()=>scrollTo(0,y))};
@@ -152,7 +154,7 @@ function horario(box){
   const br=cfg.br||(cfg.br={on:false,f:'13:00',t:'14:00'});
   h+=`<div class="dayrow br" style="margin-top:8px"><button data-br class="${br.on?'on':''}">☕ Descanso</button><input type="time" data-bf value="${br.f}" ${br.on?'':'disabled'}><input type="time" data-bt value="${br.t}" ${br.on?'':'disabled'}></div><div class="mut" style="margin-bottom:8px">El descanso aplica a todos los días de esta semana.</div>`;
   h+=`<div class="row" style="margin-top:8px"><span class="mut">Duración por cita</span><select id="dur" style="width:auto">${[20,30,45,60,90].map(m=>`<option ${S.dur===m?'selected':''} value="${m}">${m} min</option>`).join('')}</select></div></div>
-  <div class="card"><b>Link para tus clientes</b><div class="link">${esc(link)}</div><div class="row"><button class="p" id="cp">Copiar link</button><button id="wa">Enviar por WhatsApp</button></div><p class="mut" style="margin-bottom:0">Muestra esta semana y la siguiente, y se actualiza solo: puedes enviar siempre el mismo link. Solo verán los días y horas que dejaste activos. Las semanas nuevas copian el horario de la anterior, así que revisa la próxima con ›.</p></div>`;
+  <div class="card"><b>Link para tus clientes</b><div class="link">${esc(link)}</div><div class="row"><button class="p" id="cp">Copiar link</button><button id="wa">Enviar por WhatsApp</button></div><p class="mut" style="margin-bottom:0">Muestra esta semana y la siguiente, y se actualiza solo: puedes enviar siempre el mismo link. Solo verán los días y horas que dejaste activos. Las semanas nuevas copian el horario de la anterior, así que revisa también la semana siguiente.</p></div>`;
   box.innerHTML=h;
   const put=async()=>{S.weeks[ad.hwk]=cfg;await api('/admin/week/'+ad.hwk,{method:'PUT',body:JSON.stringify(cfg)})};
   box.querySelectorAll('[data-on]').forEach(b=>b.onclick=async()=>{const c=cfg.d[b.dataset.on];c.on=!c.on;await put();horario(box)});
