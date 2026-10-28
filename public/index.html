@@ -80,11 +80,11 @@ async function client(){
   if(cl.done){const d=parse(cl.done.date);app.innerHTML=`<div class="card ok"><div class="big">✅</div><h1>¡Cita confirmada!</h1><p>${esc(cl.done.name)}, te esperamos el <b>${DN[d.getDay()]} ${d.getDate()} de ${MN[d.getMonth()]}</b> a las <b>${cl.done.time}</b>.</p><p class="mut">${cl.done.mailed?`Te enviamos la confirmación a <b>${esc(cl.done.email)}</b>.`:'Tu cita quedó registrada, pero no pudimos enviar el correo de confirmación.'} Si no puedes asistir, avisa con tiempo.</p><button id="again">Agendar otra</button></div>`;
     $('again').onclick=()=>{cl.done=null;cl.day=null;cl.time=null;client()};return}
   try{cl.pub=await api('/public'+(cl.week?'?week='+cl.week:''))}catch(e){app.innerHTML='<div class="card mut">No se pudo cargar la agenda. Intenta de nuevo.</div>';return}
-  const wk=parse(cl.pub.week),days=Object.keys(cl.pub.days).filter(d=>cl.pub.days[d].length);
-  let html=`<h1>${esc(CFG.icon)} ${esc(CFG.name||'Reserva tu cita')}</h1><p class="mut">${CFG.name?'Reserva tu cita. ':''}Semana del ${wk.getDate()} de ${MN[wk.getMonth()]}. Elige un día y una hora.</p>`;
-  if(!days.length)html+=`<div class="card mut">No hay horarios disponibles esta semana. Escríbele directamente para consultar.</div>`;
+  const all=Object.keys(cl.pub.days),days=all.filter(d=>cl.pub.days[d].length);
+  let html=`<h1>${esc(CFG.icon)} ${esc(CFG.name||'Reserva tu cita')}</h1><p class="mut">${CFG.name?'Reserva tu cita. ':''}Elige un día y una hora.</p>`;
+  if(!days.length)html+=`<div class="card mut">No hay horarios disponibles en estas dos semanas. Escríbele directamente para consultar.</div>`;
   else{
-    html+=`<div class="card"><div class="row">${days.map(k=>{const d=parse(k);return `<button data-d="${k}" class="${cl.day===k?'on':''}">${DN[d.getDay()]} ${d.getDate()}</button>`}).join('')}</div></div>`;
+    html+=`<div class="card">`+[all.slice(0,7),all.slice(7)].map(wk=>{const ds=wk.filter(k=>days.includes(k));if(!ds.length)return'';const f=parse(wk[0]);return `<div class="mut" style="margin:4px 0 6px">Semana del ${f.getDate()} de ${MN[f.getMonth()]}</div><div class="row" style="margin-bottom:10px">${ds.map(k=>{const d=parse(k);return `<button data-d="${k}" class="${cl.day===k?'on':''}">${DN[d.getDay()]} ${d.getDate()}</button>`}).join('')}</div>`}).join('')+`</div>`;
     if(cl.day&&cl.pub.days[cl.day])html+=`<div class="card"><div class="slots">${cl.pub.days[cl.day].map(t=>`<button data-t="${t}" class="${cl.time===t?'on':''}">${t}</button>`).join('')}</div></div>`;
     if(cl.day&&cl.time)html+=`<div class="card"><h2 style="margin-top:0">Tus datos</h2><div class="row" style="flex-direction:column;align-items:stretch"><input id="nm" placeholder="Nombre" autocomplete="name"><input id="sv" placeholder="Servicio (ej. corte + barba, cejas, uñas acrílicas)" maxlength="100"><input id="em" type="email" placeholder="Correo electrónico (obligatorio)" autocomplete="email" required><input id="ph" type="tel" placeholder="WhatsApp / celular" autocomplete="tel"><button class="p" id="ok">Confirmar ${cl.time}</button><div class="mut" id="msg"></div></div></div>`;
   }
@@ -108,14 +108,13 @@ let ad={tab:'agenda',view:'week',cur:new Date(),hwk:iso(mon(new Date()))};
 function admin(){
   const tabs=`<div class="tab"><button data-tab="agenda" class="${ad.tab==='agenda'?'on':''}">📅 Agenda</button><button data-tab="horario" class="${ad.tab==='horario'?'on':''}">🕒 Horario y link</button></div>`;
   app.innerHTML=`<h1>${esc(CFG.icon)} ${esc(CFG.name||'Mi agenda')}</h1>${tabs}<div id="body"></div>`;
-  app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ad.tab=b.dataset.tab;ad.form=null;ad.newForm=false;admin()});
+  app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ad.tab=b.dataset.tab;ad.form=null;admin()});
   ad.tab==='agenda'?agenda($('body')):horario($('body'));
 }
 function agenda(box){
   const c=ad.cur,v=ad.view;
   const title=v==='month'?`${MN[c.getMonth()]} ${c.getFullYear()}`:v==='week'?`Semana del ${mon(c).getDate()} ${MN[mon(c).getMonth()].slice(0,3)}`:`${DN[c.getDay()]} ${c.getDate()} ${MN[c.getMonth()].slice(0,3)}`;
-  const freeOpts=ds=>{if(!ds)return'<option value="">Elige una fecha</option>';const taken=S.bookings.filter(b=>b.date===ds).map(b=>b.time),f=slotsFor(parse(ds),true).filter(t=>!taken.includes(t));return f.length?f.map(t=>`<option>${t}</option>`).join(''):'<option value="">Sin horas libres ese día</option>'};
-  let h=(ad.newForm?`<div class="card" id="nf"><b>Nueva cita</b><div class="row" style="flex-direction:column;align-items:stretch;margin-top:8px"><input id="nd" type="date" value="${ad.nd||''}"><select id="nt">${freeOpts(ad.nd)}</select><input id="nn" placeholder="Nombre del cliente"><input id="ns" placeholder="Servicio (opcional)" maxlength="100"><input id="np" type="tel" placeholder="Celular (opcional)"><div class="row"><button class="p" id="nsave">Guardar</button><button id="ncancel">Cancelar</button></div></div></div>`:`<button class="p" id="nueva" style="width:100%;margin-bottom:10px">＋ Nueva cita</button>`)+`<div class="seg" style="margin-bottom:10px">${[['month','Mes'],['week','Semana'],['day','Día']].map(([k,l])=>`<button data-v="${k}" class="${v===k?'on':''}">${l}</button>`).join('')}</div>
+  let h=`<div class="seg" style="margin-bottom:10px">${[['month','Mes'],['week','Semana'],['day','Día']].map(([k,l])=>`<button data-v="${k}" class="${v===k?'on':''}">${l}</button>`).join('')}</div>
   <div class="row sp" style="margin-bottom:10px"><button id="pv">‹</button><b>${title}</b><button id="nx">›</button></div>`;
   if(v==='month'){
     const f=new Date(c.getFullYear(),c.getMonth(),1),st=mon(f);
@@ -144,26 +143,16 @@ function agenda(box){
   box.querySelectorAll('[data-blk]').forEach(b=>b.onclick=()=>addB(b.dataset.blk,{block:true}));
   const step=n=>{const x=new Date(c);v==='month'?x.setMonth(x.getMonth()+n):x.setDate(x.getDate()+n*(v==='week'?7:1));ad.cur=x;ad.form=null;admin()};
   $('pv').onclick=()=>step(-1);$('nx').onclick=()=>step(1);
-  if($('nueva'))$('nueva').onclick=()=>{ad.newForm=true;ad.nd=iso(ad.cur);admin()};
-  if($('ncancel'))$('ncancel').onclick=()=>{ad.newForm=false;admin()};
-  if($('nd'))$('nd').onchange=e=>{ad.nd=e.target.value;$('nt').innerHTML=freeOpts(ad.nd)};
-  if($('nsave'))$('nsave').onclick=async()=>{
-    const name=$('nn').value.trim(),time=$('nt').value;
-    if(name.length<2){alert('Escribe el nombre del cliente');return}
-    if(!ad.nd||!time){alert('Elige una fecha y una hora libre');return}
-    try{await api('/admin/booking',{method:'POST',body:JSON.stringify({date:ad.nd,time,name,service:$('ns').value.trim(),phone:$('np').value.trim()})});
-      ad.newForm=false;ad.cur=parse(ad.nd);ad.view='day';await load();admin()}catch(e){alert(e.message)}
-  };
 }
 function horario(box){
-  const wk=parse(ad.hwk),cfg=weekCfg(ad.hwk),link=location.origin+'/?s='+ad.hwk;
+  const wk=parse(ad.hwk),cfg=weekCfg(ad.hwk),link=location.origin+'/';
   let h=`<div class="row sp" style="margin-bottom:10px"><button id="pw">‹</button><b>Semana del ${wk.getDate()} de ${MN[wk.getMonth()]}</b><button id="nw">›</button></div><div class="card">`;
   for(let k=1;k<=7;k++){const i=k%7,c=cfg.d[i];
     h+=`<div class="dayrow"><button data-on="${i}" class="${c.on?'on':''}">${DN[i]}</button><input type="time" data-f="${i}" value="${c.f}" ${c.on?'':'disabled'}><input type="time" data-t="${i}" value="${c.t}" ${c.on?'':'disabled'}></div>`}
   const br=cfg.br||(cfg.br={on:false,f:'13:00',t:'14:00'});
   h+=`<div class="dayrow br" style="margin-top:8px"><button data-br class="${br.on?'on':''}">☕ Descanso</button><input type="time" data-bf value="${br.f}" ${br.on?'':'disabled'}><input type="time" data-bt value="${br.t}" ${br.on?'':'disabled'}></div><div class="mut" style="margin-bottom:8px">El descanso aplica a todos los días de esta semana.</div>`;
   h+=`<div class="row" style="margin-top:8px"><span class="mut">Duración por cita</span><select id="dur" style="width:auto">${[20,30,45,60,90].map(m=>`<option ${S.dur===m?'selected':''} value="${m}">${m} min</option>`).join('')}</select></div></div>
-  <div class="card"><b>Link de esta semana</b><div class="link">${esc(link)}</div><div class="row"><button class="p" id="cp">Copiar link</button><button id="wa">Enviar por WhatsApp</button></div><p class="mut" style="margin-bottom:0">Tus clientes solo verán los días y horas que dejaste activos. Las semanas nuevas copian el horario de la anterior.</p></div>`;
+  <div class="card"><b>Link para tus clientes</b><div class="link">${esc(link)}</div><div class="row"><button class="p" id="cp">Copiar link</button><button id="wa">Enviar por WhatsApp</button></div><p class="mut" style="margin-bottom:0">Muestra esta semana y la siguiente, y se actualiza solo: puedes enviar siempre el mismo link. Solo verán los días y horas que dejaste activos. Las semanas nuevas copian el horario de la anterior, así que revisa la próxima con ›.</p></div>`;
   box.innerHTML=h;
   const put=async()=>{S.weeks[ad.hwk]=cfg;await api('/admin/week/'+ad.hwk,{method:'PUT',body:JSON.stringify(cfg)})};
   box.querySelectorAll('[data-on]').forEach(b=>b.onclick=async()=>{const c=cfg.d[b.dataset.on];c.on=!c.on;await put();horario(box)});
