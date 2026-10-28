@@ -135,9 +135,9 @@ app.get('/api/config', (_, res) => res.json({ name: process.env.BUSINESS_NAME ||
 // Público: horas libres de una semana (sin datos de otros clientes)
 app.get('/api/public', (req, res) => {
   const wk = monday(DATE.test(req.query.week) ? req.query.week : toIso(nowCO()));
-  const taken = db.prepare('SELECT date,time FROM bookings WHERE date BETWEEN ? AND ?').all(wk, addD(wk, 6));
+  const taken = db.prepare('SELECT date,time FROM bookings WHERE date BETWEEN ? AND ?').all(wk, addD(wk, 13));
   const days = {};
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 14; i++) { // esta semana y la siguiente
     const d = addD(wk, i);
     days[d] = slotsFor(d).filter(t => !taken.some(x => x.date === d && x.time === t));
   }
