@@ -62,7 +62,7 @@ async function sendConfirmation(b) {
   const { dia, hora } = cuandoDe(b), addr = getAddress();
   const aviso = addr ? `Te esperamos en ${addr}. Recuerda llegar 10 minutos antes.` : 'Recuerda llegar 10 minutos antes.';
   const body = `<p style="font-size:16px;line-height:1.5;margin:0 0 18px">Hola <b>${esc(b.name)}</b>, tu cita quedó agendada. Estos son los detalles:</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${fila(ICON || '💼', 'Servicio', esc(b.service))}${addr ? fila('📍', 'Lugar', esc(addr)) : ''}</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${fila(ICON || '💼', 'Servicio', esc(b.service))}</table>
 <p style="font-size:15px;line-height:1.5;margin:22px 0 0;padding:14px 16px;background:#f3f4f6;border-radius:10px;color:#111827">⏰ ${esc(aviso)}</p>
 ${addr ? `<div style="text-align:center;margin-top:22px">${boton('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr), '📍 Ver en el mapa')}</div>` : ''}
 <p style="font-size:14px;line-height:1.6;color:#6b7280;margin:22px 0 0;text-align:center">Si no puedes asistir, avísanos con tiempo.${PHONE ? `<br>¿Dudas? Comunícate al <a href="${waLink}" style="color:${ACCENT};font-weight:600">${esc(PHONE)}</a>` : ''}</p>`;
@@ -83,7 +83,7 @@ async function notifyOwner(b) {
   if (!mailer || !to) return;
   const { dia, hora } = cuandoDe(b);
   const body = `<p style="font-size:16px;line-height:1.5;margin:0 0 18px"><b>${esc(b.name)}</b> acaba de agendar una cita.</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${fila('👤', 'Cliente', esc(b.name))}${fila(ICON || '💼', 'Servicio', esc(b.service))}${fila('📱', 'Celular', `<a href="https://wa.me/${waNum(b.phone)}" style="color:${ACCENT}">${esc(b.phone)}</a>`)}${fila('✉️', 'Correo', `<a href="mailto:${esc(b.email)}" style="color:${ACCENT}">${esc(b.email)}</a>`)}</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${fila(ICON || '💼', 'Servicio', esc(b.service))}${fila('📱', 'Celular', `<a href="https://wa.me/${waNum(b.phone)}" style="color:${ACCENT}">${esc(b.phone)}</a>`)}${fila('✉️', 'Correo', `<a href="mailto:${esc(b.email)}" style="color:${ACCENT}">${esc(b.email)}</a>`)}</table>
 <div style="text-align:center;margin-top:24px">${boton('https://wa.me/' + waNum(b.phone), '💬 Escribirle por WhatsApp')}</div>`;
   try {
     await mailer.sendMail({
