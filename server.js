@@ -47,16 +47,31 @@ if (!mailer) console.warn('SMTP_HOST no configurado: no se enviarán correos de 
 const DIAS = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
 const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// ---------- Correos (diseño con tablas e estilos en línea, para que se vea igual en Gmail, Outlook, etc.) ----------
+const ACCENT = '#2f6f5e';
+const waNum = p => { const d = String(p).replace(/\D/g, ''); return d.length === 10 ? '57' + d : d; };
+const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+const cuandoDe = b => { const d = new Date(b.date + 'T00:00:00Z'); return { dia: `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]}`, hora: b.time }; };
+const fila = (ic, label, val) => `<tr><td style="padding:12px 0;border-bottom:1px solid #eef0f2;width:34px;font-size:20px;vertical-align:top">${ic}</td><td style="padding:12px 0;border-bottom:1px solid #eef0f2;vertical-align:top"><div style="font-size:11px;color:#8a919a;text-transform:uppercase;letter-spacing:.8px">${label}</div><div style="font-size:16px;color:#1f2328;font-weight:600;margin-top:2px">${val}</div></td></tr>`;
+const boton = (href, txt) => `<a href="${href}" style="display:inline-block;background:${ACCENT};color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 24px;border-radius:10px">${txt}</a>`;
+const shell = (sub, head, body, foot) => `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 12px"><tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;overflow:hidden;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#1f2328"><tr><td style="background:${ACCENT};padding:30px 24px;text-align:center"><div style="font-size:12px;color:#cfe6df;letter-spacing:1.2px;text-transform:uppercase">${sub}</div><div style="font-size:26px;font-weight:700;color:#ffffff;margin-top:8px">${head}</div></td></tr><tr><td style="padding:26px 24px">${body}</td></tr><tr><td style="padding:16px 24px 22px;background:#fafafa;text-align:center;font-size:12px;color:#8a919a;border-top:1px solid #eef0f2">${foot}</td></tr></table></td></tr></table></body></html>`;
+const marca = () => `${ICON ? ICON + ' ' : ''}${esc(BUSINESS)}`;
+
 async function sendConfirmation(b) {
   if (!mailer) return false;
-  const d = new Date(b.date + 'T00:00:00Z');
-  const cuando = `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]} a las ${b.time}`;
+  const { dia, hora } = cuandoDe(b), addr = getAddress();
+  const aviso = addr ? `Te esperamos en ${addr}. Recuerda llegar 10 minutos antes.` : 'Recuerda llegar 10 minutos antes.';
+  const body = `<p style="font-size:16px;line-height:1.5;margin:0 0 18px">Hola <b>${esc(b.name)}</b>, tu cita quedó agendada. Estos son los detalles:</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${fila(ICON || '💼', 'Servicio', esc(b.service))}${addr ? fila('📍', 'Lugar', esc(addr)) : ''}</table>
+<p style="font-size:15px;line-height:1.5;margin:22px 0 0;padding:14px 16px;background:#e8f3ef;border-radius:10px;color:#1f4d41">⏰ ${esc(aviso)}</p>
+${addr ? `<div style="text-align:center;margin-top:22px">${boton('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr), '📍 Ver en el mapa')}</div>` : ''}
+<p style="font-size:14px;line-height:1.6;color:#6b7280;margin:22px 0 0;text-align:center">Si no puedes asistir, avísanos con tiempo.${PHONE ? `<br>¿Dudas? Comunícate al <a href="${waLink}" style="color:${ACCENT};font-weight:600">${esc(PHONE)}</a>` : ''}</p>`;
   try {
     await mailer.sendMail({
       from: MAIL_FROM || SMTP_USER, to: b.email,
-      subject: `Cita confirmada: ${cuando}`,
-      text: `Hola ${b.name}, tu cita quedó confirmada para el ${cuando}.\nServicio: ${b.service}\n\nSi no puedes asistir, avísanos con tiempo.\n\n${BUSINESS}${PHONE ? `\n¿Dudas? Comunícate al ${PHONE}` : ''}\n\n${AUTO}`,
-      html: `<div style="font-family:system-ui,sans-serif;max-width:480px"><h2>¡Cita confirmada!</h2><p>Hola ${esc(b.name)}, te esperamos el <b>${esc(cuando)}</b>.</p><p>Servicio: <b>${esc(b.service)}</b></p><p style="color:#666">Si no puedes asistir, avísanos con tiempo.</p><p style="margin:16px 0 0"><b>${esc(BUSINESS)}</b>${PHONE ? `<br>¿Dudas? Comunícate al <a href="${waLink}">${esc(PHONE)}</a>` : ''}</p><p style="color:#888;font-size:12px;margin-top:16px">${AUTO}</p></div>`
+      subject: `Cita confirmada: ${dia} a las ${hora}`,
+      text: `¡Cita confirmada!\n\nHola ${b.name}, tu cita quedó agendada.\nFecha: ${cap(dia)}\nHora: ${hora}\nServicio: ${b.service}${addr ? `\nLugar: ${addr}` : ''}\n\n${aviso}\nSi no puedes asistir, avísanos con tiempo.${PHONE ? `\n¿Dudas? Comunícate al ${PHONE}` : ''}\n\n${BUSINESS}\n${AUTO}`,
+      html: shell(marca(), '¡Cita confirmada! ✅', body, esc(AUTO))
     });
     return true;
   } catch (e) { console.error('Falló el envío de correo:', e.message); return false; }
@@ -66,14 +81,16 @@ async function sendConfirmation(b) {
 async function notifyOwner(b) {
   const to = process.env.NOTIFY_EMAIL || SMTP_USER;
   if (!mailer || !to) return;
-  const d = new Date(b.date + 'T00:00:00Z');
-  const cuando = `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]} a las ${b.time}`;
+  const { dia, hora } = cuandoDe(b);
+  const body = `<p style="font-size:16px;line-height:1.5;margin:0 0 18px"><b>${esc(b.name)}</b> acaba de agendar una cita.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${fila('👤', 'Cliente', esc(b.name))}${fila(ICON || '💼', 'Servicio', esc(b.service))}${fila('📱', 'Celular', `<a href="https://wa.me/${waNum(b.phone)}" style="color:${ACCENT}">${esc(b.phone)}</a>`)}${fila('✉️', 'Correo', `<a href="mailto:${esc(b.email)}" style="color:${ACCENT}">${esc(b.email)}</a>`)}</table>
+<div style="text-align:center;margin-top:24px">${boton('https://wa.me/' + waNum(b.phone), '💬 Escribirle por WhatsApp')}</div>`;
   try {
     await mailer.sendMail({
       from: MAIL_FROM || SMTP_USER, to,
-      subject: `Nueva cita: ${b.name} - ${cuando}`,
-      text: `Nueva cita\n${cuando}\nCliente: ${b.name}\nServicio: ${b.service}\nCelular: ${b.phone}\nCorreo: ${b.email}`,
-      html: `<div style="font-family:system-ui,sans-serif;max-width:480px"><h2>Nueva cita</h2><p><b>${esc(cuando)}</b></p><p>Cliente: <b>${esc(b.name)}</b><br>Servicio: ${esc(b.service)}<br>Celular: <a href="https://wa.me/57${esc(String(b.phone).replace(/\D/g, ''))}">${esc(b.phone)}</a><br>Correo: ${esc(b.email)}</p></div>`
+      subject: `Nueva cita: ${b.name} - ${dia} a las ${hora}`,
+      text: `Nueva cita\n${cap(dia)} a las ${hora}\nCliente: ${b.name}\nServicio: ${b.service}\nCelular: ${b.phone}\nCorreo: ${b.email}`,
+      html: shell(marca(), 'Nueva cita 🗓️', body, 'Aviso automático de tu agenda de citas.')
     });
   } catch (e) { console.error('Falló el aviso al profesional:', e.message); }
 }
@@ -87,6 +104,7 @@ const nowCO = () => new Date(Date.now() - 5 * 3600e3);
 const tm = s => { const [a, b] = s.split(':').map(Number); return a * 60 + b; };
 const hm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
 
+const getAddress = () => db.prepare("SELECT v FROM settings WHERE k='address'").get()?.v || '';
 const getDur = () => Number(db.prepare("SELECT v FROM settings WHERE k='dur'").get()?.v) || 45;
 function weekCfg(wk) {
   const q = db.prepare('SELECT cfg FROM weeks WHERE wk=?');
@@ -165,7 +183,7 @@ app.post('/api/book', limit, async (req, res) => {
 // Admin
 app.get('/api/admin/state', auth, (req, res) => {
   const weeks = {}; for (const r of db.prepare('SELECT wk,cfg FROM weeks').all()) weeks[r.wk] = JSON.parse(r.cfg);
-  res.json({ dur: getDur(), weeks, bookings: db.prepare('SELECT id,date,time,name,phone,email,service FROM bookings ORDER BY date,time').all() });
+  res.json({ dur: getDur(), address: getAddress(), weeks, bookings: db.prepare('SELECT id,date,time,name,phone,email,service FROM bookings ORDER BY date,time').all() });
 });
 app.put('/api/admin/week/:wk', auth, (req, res) => {
   const wk = req.params.wk, cfg = req.body;
@@ -173,6 +191,11 @@ app.put('/api/admin/week/:wk', auth, (req, res) => {
   const T = /^\d{2}:\d{2}$/, b = cfg.br;
   const br = b && T.test(b.f) && T.test(b.t) ? { on: !!b.on, f: b.f, t: b.t } : { on: false, f: '13:00', t: '14:00' };
   db.prepare('INSERT INTO weeks(wk,cfg) VALUES(?,?) ON CONFLICT(wk) DO UPDATE SET cfg=excluded.cfg').run(wk, JSON.stringify({ d: cfg.d, br }));
+  res.json({ ok: true });
+});
+app.put('/api/admin/address', auth, (req, res) => {
+  const v = String(req.body?.address ?? '').trim().slice(0, 200);
+  db.prepare("INSERT INTO settings(k,v) VALUES('address',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(v);
   res.json({ ok: true });
 });
 app.put('/api/admin/dur', auth, (req, res) => {
