@@ -32,6 +32,7 @@ input,select{background:var(--card);border:1px solid var(--bd);border-radius:10p
 .free{color:var(--mut)}
 .dayrow{display:grid;grid-template-columns:60px 1fr 1fr;gap:6px;align-items:center;margin-bottom:8px}.dayrow.br{grid-template-columns:104px 1fr 1fr}
 .dayrow>*{min-width:0;width:100%}.dayrow button{padding:8px 0;text-align:center}.dayrow:not(.br) button{white-space:nowrap}.dayrow input{padding:8px 6px;font-size:15px}
+.ghost{background:none;border:0;color:var(--mut);font-size:14px;text-decoration:underline;padding:6px 8px}
 .pw{text-align:center;color:var(--mut);font-size:12px;padding:8px 0 24px}
 .tab{display:flex;gap:6px;margin-bottom:12px}.tab button{flex:1}
 .link{word-break:break-all;font-size:13px;background:var(--bg);border:1px dashed var(--bd);border-radius:10px;padding:8px;margin:8px 0}
@@ -45,6 +46,7 @@ const add=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
 const mon=d=>add(new Date(d.getFullYear(),d.getMonth(),d.getDate()),-((d.getDay()+6)%7));
 const hm=m=>`${pad(Math.floor(m/60))}:${pad(m%60)}`,tm=s=>{const[a,b]=s.split(':').map(Number);return a*60+b};
 const $=id=>document.getElementById(id),app=$('app');
+const wa=p=>{const d=String(p).replace(/\D/g,'');return d.length===10?'57'+d:d};
 const el=(h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let CFG={name:'',icon:'✂️'};
@@ -110,7 +112,7 @@ let ad={tab:'agenda',view:'week',cur:new Date(),hwk:iso(mon(new Date()))};
 function admin(){
   const tabs=`<div class="tab"><button data-tab="agenda" class="${ad.tab==='agenda'?'on':''}">📅 Agenda</button><button data-tab="horario" class="${ad.tab==='horario'?'on':''}">🕒 Horario y link</button></div>`;
   app.innerHTML=`<h1>${esc(CFG.icon)} ${esc(CFG.name||'Mi agenda')}</h1>${tabs}<div id="body"></div>`;
-  app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ad.tab=b.dataset.tab;ad.form=null;admin()});
+  app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ad.tab=b.dataset.tab;ad.form=null;ad.addrOpen=false;admin()});
   ad.tab==='agenda'?agenda($('body')):horario($('body'));
 }
 function agenda(box){
@@ -130,7 +132,7 @@ function agenda(box){
   }else{
     const L=bks(c),sl=slotsFor(c,true),times=[...new Set([...sl,...L.map(b=>b.time)])].sort();
     h+=`<div class="card">`+(times.length?times.map(t=>{const b=L.find(x=>x.time===t);
-      if(b)return `<div class="item"><div><b>${t}</b> <span>${esc(b.name)}</span>${b.service?`<div>${esc(CFG.icon)} ${esc(b.service)}</div>`:''}${b.phone||b.email?`<div class="mut">${b.phone?`<a href="https://wa.me/57${esc(b.phone.replace(/\D/g,''))}" target="_blank" rel="noopener">${esc(b.phone)}</a>`:''}${b.phone&&b.email?' · ':''}${b.email?esc(b.email):''}</div>`:''}</div><button class="d" data-del="${b.id}">Cancelar</button></div>`;
+      if(b)return `<div class="item"><div><b>${t}</b> <span>${esc(b.name)}</span>${b.service?`<div>${esc(CFG.icon)} ${esc(b.service)}</div>`:''}${b.phone||b.email?`<div class="mut">${b.phone?`<a href="https://wa.me/${wa(b.phone)}" target="_blank" rel="noopener">${esc(b.phone)}</a>`:''}${b.phone&&b.email?' · ':''}${b.email?esc(b.email):''}</div>`:''}</div><button class="d" data-del="${b.id}">Cancelar</button></div>`;
       if(ad.form===t)return `<div class="item" style="flex-direction:column;align-items:stretch"><b>${t}</b><input id="mn" placeholder="Nombre del cliente"><input id="ms" placeholder="Servicio (opcional)" maxlength="100"><input id="mp" type="tel" placeholder="Celular (opcional)"><div class="row"><button class="p" data-save="${t}">Guardar</button><button data-cancel="1">Cancelar</button></div></div>`;
       return `<div class="item"><div><b>${t}</b> <span class="free">Libre</span></div><div class="row"><button data-new="${t}">Agendar</button><button data-blk="${t}">Bloquear</button></div></div>`}).join(''):'<div class="mut">Sin horario este día.</div>')+`</div>`;
   }
@@ -154,7 +156,8 @@ function horario(box){
   const br=cfg.br||(cfg.br={on:false,f:'13:00',t:'14:00'});
   h+=`<div class="dayrow br" style="margin-top:8px"><button data-br class="${br.on?'on':''}">☕ Descanso</button><input type="time" data-bf value="${br.f}" ${br.on?'':'disabled'}><input type="time" data-bt value="${br.t}" ${br.on?'':'disabled'}></div><div class="mut" style="margin-bottom:8px">El descanso aplica a todos los días de esta semana.</div>`;
   h+=`<div class="row" style="margin-top:8px"><span class="mut">Duración por cita</span><select id="dur" style="width:auto">${[20,30,45,60,90].map(m=>`<option ${S.dur===m?'selected':''} value="${m}">${m} min</option>`).join('')}</select></div></div>
-  <div class="card"><b>Link para tus clientes</b><div class="link">${esc(link)}</div><div class="row"><button class="p" id="cp">Copiar link</button><button id="wa">Enviar por WhatsApp</button></div><p class="mut" style="margin-bottom:0">Muestra esta semana y la siguiente, y se actualiza solo: puedes enviar siempre el mismo link. Solo verán los días y horas que dejaste activos. Las semanas nuevas copian el horario de la anterior, así que revisa también la semana siguiente.</p></div>`;
+  <div class="card"><b>Link para tus clientes</b><div class="link">${esc(link)}</div><div class="row"><button class="p" id="cp">Copiar link</button><button id="wa">Enviar por WhatsApp</button></div><p class="mut" style="margin-bottom:0">Muestra esta semana y la siguiente, y se actualiza solo: puedes enviar siempre el mismo link. Solo verán los días y horas que dejaste activos. Las semanas nuevas copian el horario de la anterior, así que revisa también la semana siguiente.</p></div>
+  <div style="text-align:center;margin-bottom:8px">${ad.addrOpen?`<div class="card" style="text-align:left"><b>Dirección</b><input id="addrin" style="margin-top:8px" placeholder="Ej. Calle 5 #10-20, Cali" maxlength="200" value="${esc(S.address||'')}"><div class="mut" style="margin:6px 0 10px">Aparece en el correo de confirmación que recibe el cliente.</div><div class="row"><button class="p" id="adsave">Guardar</button><button id="adcancel">Cancelar</button></div></div>`:`<button class="ghost" id="addr">📍 Modificar dirección</button>${S.address?`<div class="mut" style="font-size:12px">${esc(S.address)}</div>`:''}`}</div>`;
   box.innerHTML=h;
   const put=async()=>{S.weeks[ad.hwk]=cfg;await api('/admin/week/'+ad.hwk,{method:'PUT',body:JSON.stringify(cfg)})};
   box.querySelectorAll('[data-on]').forEach(b=>b.onclick=async()=>{const c=cfg.d[b.dataset.on];c.on=!c.on;await put();horario(box)});
@@ -163,6 +166,9 @@ function horario(box){
   box.querySelectorAll('[data-br]').forEach(b=>b.onclick=async()=>{cfg.br.on=!cfg.br.on;await put();horario(box)});
   box.querySelectorAll('[data-bf]').forEach(i=>i.onchange=()=>{cfg.br.f=i.value;put()});
   box.querySelectorAll('[data-bt]').forEach(i=>i.onchange=()=>{cfg.br.t=i.value;put()});
+  if($('addr'))$('addr').onclick=()=>{ad.addrOpen=true;horario(box);setTimeout(()=>{const i=$('addrin');i&&i.focus()},0)};
+  if($('adcancel'))$('adcancel').onclick=()=>{ad.addrOpen=false;horario(box)};
+  if($('adsave'))$('adsave').onclick=async()=>{const v=$('addrin').value.trim();try{await api('/admin/address',{method:'PUT',body:JSON.stringify({address:v})});S.address=v;ad.addrOpen=false;horario(box)}catch(e){alert(e.message)}};
   $('dur').onchange=async e=>{S.dur=+e.target.value;await api('/admin/dur',{method:'PUT',body:JSON.stringify({dur:S.dur})})};
   $('pw').onclick=()=>{ad.hwk=iso(add(wk,-7));horario(box)};$('nw').onclick=()=>{ad.hwk=iso(add(wk,7));horario(box)};
   $('cp').onclick=async()=>{try{await navigator.clipboard.writeText(link);$('cp').textContent='¡Copiado!'}catch(e){$('cp').textContent='Copia el texto de arriba'}};
