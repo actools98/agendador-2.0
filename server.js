@@ -48,13 +48,13 @@ const DIAS = ['domingo','lunes','martes','miércoles','jueves','viernes','sábad
 const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // ---------- Correos (diseño con tablas e estilos en línea, para que se vea igual en Gmail, Outlook, etc.) ----------
-const ACCENT = '#2f6f5e';
+const ACCENT = '#1f2937';
 const waNum = p => { const d = String(p).replace(/\D/g, ''); return d.length === 10 ? '57' + d : d; };
 const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
 const cuandoDe = b => { const d = new Date(b.date + 'T00:00:00Z'); return { dia: `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]}`, hora: b.time }; };
 const fila = (ic, label, val) => `<tr><td style="padding:12px 0;border-bottom:1px solid #eef0f2;width:34px;font-size:20px;vertical-align:top">${ic}</td><td style="padding:12px 0;border-bottom:1px solid #eef0f2;vertical-align:top"><div style="font-size:11px;color:#8a919a;text-transform:uppercase;letter-spacing:.8px">${label}</div><div style="font-size:16px;color:#1f2328;font-weight:600;margin-top:2px">${val}</div></td></tr>`;
 const boton = (href, txt) => `<a href="${href}" style="display:inline-block;background:${ACCENT};color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 24px;border-radius:10px">${txt}</a>`;
-const shell = (sub, head, body, foot) => `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 12px"><tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;overflow:hidden;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#1f2328"><tr><td style="background:${ACCENT};padding:30px 24px;text-align:center"><div style="font-size:12px;color:#cfe6df;letter-spacing:1.2px;text-transform:uppercase">${sub}</div><div style="font-size:26px;font-weight:700;color:#ffffff;margin-top:8px">${head}</div></td></tr><tr><td style="padding:26px 24px">${body}</td></tr><tr><td style="padding:16px 24px 22px;background:#fafafa;text-align:center;font-size:12px;color:#8a919a;border-top:1px solid #eef0f2">${foot}</td></tr></table></td></tr></table></body></html>`;
+const shell = (sub, head, body, foot) => `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 12px"><tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;overflow:hidden;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#1f2328"><tr><td style="background:${ACCENT};padding:30px 24px;text-align:center"><div style="font-size:12px;color:#d1d5db;letter-spacing:1.2px;text-transform:uppercase">${sub}</div><div style="font-size:26px;font-weight:700;color:#ffffff;margin-top:8px">${head}</div></td></tr><tr><td style="padding:26px 24px">${body}</td></tr><tr><td style="padding:16px 24px 22px;background:#fafafa;text-align:center;font-size:12px;color:#8a919a;border-top:1px solid #eef0f2">${foot}</td></tr></table></td></tr></table></body></html>`;
 const marca = () => `${ICON ? ICON + ' ' : ''}${esc(BUSINESS)}`;
 
 async function sendConfirmation(b) {
@@ -63,7 +63,7 @@ async function sendConfirmation(b) {
   const aviso = addr ? `Te esperamos en ${addr}. Recuerda llegar 10 minutos antes.` : 'Recuerda llegar 10 minutos antes.';
   const body = `<p style="font-size:16px;line-height:1.5;margin:0 0 18px">Hola <b>${esc(b.name)}</b>, tu cita quedó agendada. Estos son los detalles:</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${fila(ICON || '💼', 'Servicio', esc(b.service))}${addr ? fila('📍', 'Lugar', esc(addr)) : ''}</table>
-<p style="font-size:15px;line-height:1.5;margin:22px 0 0;padding:14px 16px;background:#e8f3ef;border-radius:10px;color:#1f4d41">⏰ ${esc(aviso)}</p>
+<p style="font-size:15px;line-height:1.5;margin:22px 0 0;padding:14px 16px;background:#f3f4f6;border-radius:10px;color:#111827">⏰ ${esc(aviso)}</p>
 ${addr ? `<div style="text-align:center;margin-top:22px">${boton('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr), '📍 Ver en el mapa')}</div>` : ''}
 <p style="font-size:14px;line-height:1.6;color:#6b7280;margin:22px 0 0;text-align:center">Si no puedes asistir, avísanos con tiempo.${PHONE ? `<br>¿Dudas? Comunícate al <a href="${waLink}" style="color:${ACCENT};font-weight:600">${esc(PHONE)}</a>` : ''}</p>`;
   try {
