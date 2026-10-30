@@ -33,6 +33,7 @@ input,select{background:var(--card);border:1px solid var(--bd);border-radius:10p
 .dayrow{display:grid;grid-template-columns:60px 1fr 1fr;gap:6px;align-items:center;margin-bottom:8px}.dayrow.br{grid-template-columns:104px 1fr 1fr}
 .dayrow>*{min-width:0;width:100%}.dayrow button{padding:8px 0;text-align:center}.dayrow:not(.br) button{white-space:nowrap}.dayrow input{padding:8px 6px;font-size:15px}
 .ghost{background:none;border:0;color:var(--mut);font-size:14px;text-decoration:underline;padding:6px 8px}
+.svc{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;margin-bottom:8px;padding:12px 14px}.svc:last-child{margin-bottom:0}.svc small{display:block;color:var(--mut);font-size:13px;font-weight:400}
 .pw{text-align:center;color:var(--mut);font-size:12px;padding:8px 0 24px}
 .tab{display:flex;gap:6px;margin-bottom:12px}.tab button{flex:1}
 .link{word-break:break-all;font-size:13px;background:var(--bg);border:1px dashed var(--bd);border-radius:10px;padding:8px;margin:8px 0}
@@ -46,12 +47,14 @@ const add=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
 const mon=d=>add(new Date(d.getFullYear(),d.getMonth(),d.getDate()),-((d.getDay()+6)%7));
 const hm=m=>`${pad(Math.floor(m/60))}:${pad(m%60)}`,tm=s=>{const[a,b]=s.split(':').map(Number);return a*60+b};
 const $=id=>document.getElementById(id),app=$('app');
+const money=n=>'$'+Number(n||0).toLocaleString('es-CO');
 const wa=p=>{const d=String(p).replace(/\D/g,'');return d.length===10?'57'+d:d};
 const el=(h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let CFG={name:'',icon:'✂️'};
-let S={dur:45,weeks:{},bookings:[]},KEY=localStorage.getItem('akey')||'';
+let CFG={name:'',icon:'✂️',services:[],pros:[]};
+let S={dur:45,buffer:10,services:[],pros:[],role:'admin',weeks:{},bookings:[]},KEY=localStorage.getItem('akey')||'';
 async function api(p,o={}){
+  if(p.startsWith('/admin')&&S.role==='admin'&&ad.pro)p+=(p.includes('?')?'&':'?')+'pro='+ad.pro;
   const r=await fetch('/api'+p,{...o,headers:{'Content-Type':'application/json',...(KEY?{Authorization:'Bearer '+KEY}:{})}});
   const j=await r.json().catch(()=>({}));
   if(r.status===401){KEY='';localStorage.removeItem('akey')}
@@ -65,54 +68,67 @@ function weekCfg(wk){
   for(let i=0;i<7;i++)d[i]=prev?{...prev.d[i]}:{on:i>=1&&i<=5,f:'09:00',t:'18:00'};
   return {d,br:{...((prev&&prev.br)||{on:false,f:'13:00',t:'14:00'})}};
 }
-function slotsFor(date,all){
-  const cfg=weekCfg(iso(mon(date))),c=cfg.d[date.getDay()],br=cfg.br&&cfg.br.on?cfg.br:null;
-  if(!c||!c.on)return[];
-  const out=[],now=new Date();
-  for(let m=tm(c.f);m+S.dur<=tm(c.t);m+=S.dur){
-    if(br&&m<tm(br.t)&&m+S.dur>tm(br.f))continue;
-    const dt=new Date(date);dt.setHours(0,m,0,0);
-    if(all||dt>now)out.push(hm(m));
-  }
-  return out;
-}
+const dayOn=d=>{const c=weekCfg(iso(mon(d))).d[d.getDay()];return !!(c&&c.on)};
 const bks=d=>S.bookings.filter(b=>b.date===iso(d)).sort((a,b)=>a.time<b.time?-1:1);
 
 /* ---------- CLIENTE ---------- */
-let cl={week:new URLSearchParams(location.search).get('s'),pub:null,day:null,time:null,done:null};
+const qs=new URLSearchParams(location.search);
+let cl={week:qs.get('s'),pro:qs.get('p'),svc:null,pub:null,day:null,time:null,done:null};
 async function client(){
-  if(cl.done){const d=parse(cl.done.date);app.innerHTML=`<div class="card ok"><div class="big">✅</div><h1>¡Cita confirmada!</h1><p>${esc(cl.done.name)}, te esperamos el <b>${DN[d.getDay()]} ${d.getDate()} de ${MN[d.getMonth()]}</b> a las <b>${cl.done.time}</b>.</p><p class="mut">${cl.done.mailed?`Te enviamos la confirmación a <b>${esc(cl.done.email)}</b>.`:'Tu cita quedó registrada, pero no pudimos enviar el correo de confirmación.'} Si no puedes asistir, avisa con tiempo.</p><button id="again">Agendar otra</button></div>`;
-    $('again').onclick=()=>{cl.done=null;cl.day=null;cl.time=null;client()};return}
-  try{cl.pub=await api('/public'+(cl.week?'?week='+cl.week:''))}catch(e){app.innerHTML='<div class="card mut">No se pudo cargar la agenda. Intenta de nuevo.</div>';return}
+  const pros=CFG.pros||[],multi=pros.length>1,pr=pros.find(x=>x.id===cl.pro);
+  if(multi&&!pr)cl.pro=null;
+  const list=CFG.services||[],hasSvc=list.length>0,sel=list.find(x=>x.id===cl.svc);
+  if(cl.done){const d=parse(cl.done.date);app.innerHTML=`<div class="card ok"><div class="big">✅</div><h1>¡Cita confirmada!</h1><p>${esc(cl.done.name)}, te esperamos el <b>${DN[d.getDay()]} ${d.getDate()} de ${MN[d.getMonth()]}</b> a las <b>${cl.done.time}</b>.</p>${cl.done.pro?`<p>Con <b>${esc(cl.done.pro)}</b></p>`:''}<p>${esc(cl.done.service)}${cl.done.price>0?' · '+money(cl.done.price):''}</p><p class="mut">${cl.done.mailed?`Te enviamos la confirmación a <b>${esc(cl.done.email)}</b>.`:'Tu cita quedó registrada, pero no pudimos enviar el correo de confirmación.'} Si no puedes asistir, avisa con tiempo.</p><button id="again">Agendar otra</button></div>`;
+    $('again').onclick=()=>{cl.done=null;cl.day=null;cl.time=null;cl.svc=null;if(multi)cl.pro=null;client()};return}
+  const head=`<h1>${esc(CFG.icon)} ${esc(CFG.name||'Reserva tu cita')}</h1>`;
+  if(multi&&!pr){
+    app.innerHTML=head+`<p class="mut">${CFG.name?'Reserva tu cita. ':''}¿Con quién quieres tu cita?</p><div class="card">`+pros.map(x=>`<button class="svc" data-pr="${x.id}"><b>${esc(x.name)}</b><span class="mut">›</span></button>`).join('')+`</div>`;
+    app.querySelectorAll('[data-pr]').forEach(b=>b.onclick=()=>{cl.pro=b.dataset.pr;cl.day=null;cl.time=null;client()});return}
+  if(hasSvc&&!sel){
+    app.innerHTML=head+(multi?`<div class="card row sp"><span>Con <b>${esc(pr.name)}</b></span><button id="chgp">Cambiar</button></div>`:'')+`<p class="mut">${CFG.name?'Reserva tu cita. ':''}¿Qué servicio quieres?</p><div class="card">`+list.map(x=>`<button class="svc" data-s="${x.id}"><span><b>${esc(x.name)}</b><small>${x.dur} min</small></span><b>${x.price>0?money(x.price):''}</b></button>`).join('')+`</div>`;
+    if($('chgp'))$('chgp').onclick=()=>{cl.pro=null;cl.day=null;cl.time=null;client()};
+    app.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{cl.svc=b.dataset.s;cl.day=null;cl.time=null;client()});return}
+  try{cl.pub=await api('/public?'+(cl.week?'week='+cl.week+'&':'')+(multi?'pro='+cl.pro+'&':'')+(hasSvc?'service='+cl.svc:''))}catch(e){app.innerHTML=head+'<div class="card mut">No se pudo cargar la agenda. Intenta de nuevo.</div>';return}
   const all=Object.keys(cl.pub.days),days=all.filter(d=>cl.pub.days[d].length);
-  let html=`<h1>${esc(CFG.icon)} ${esc(CFG.name||'Reserva tu cita')}</h1><p class="mut">${CFG.name?'Reserva tu cita. ':''}Elige un día y una hora.</p>`;
-  if(!days.length)html+=`<div class="card mut">No hay horarios disponibles en estas dos semanas. Escríbele directamente para consultar.</div>`;
+  let html=head+`<p class="mut">${CFG.name?'Reserva tu cita. ':''}Elige un día y una hora.</p>`;
+  if(multi)html+=`<div class="card row sp"><span>Con <b>${esc(pr.name)}</b></span><button id="chgp">Cambiar</button></div>`;
+  if(sel)html+=`<div class="card row sp"><span><b>${esc(sel.name)}</b><br><span class="mut">${sel.dur} min${sel.price>0?' · '+money(sel.price):''}</span></span><button id="chg">Cambiar</button></div>`;
+  if(!days.length)html+=`<div class="card mut">No hay horarios disponibles en estas dos semanas${multi?' con '+esc(pr.name):''}. ${multi?'Prueba con otro profesional o escríbele':'Escríbele'} directamente para consultar.</div>`;
   else{
     html+=`<div class="card">`+[all.slice(0,7),all.slice(7)].map(wk=>{const ds=wk.filter(k=>days.includes(k));if(!ds.length)return'';const f=parse(wk[0]);return `<div class="mut" style="margin:4px 0 6px">Semana del ${f.getDate()} de ${MN[f.getMonth()]}</div><div class="row" style="margin-bottom:10px">${ds.map(k=>{const d=parse(k);return `<button data-d="${k}" class="${cl.day===k?'on':''}">${DN[d.getDay()]} ${d.getDate()}</button>`}).join('')}</div>`}).join('')+`</div>`;
     if(cl.day&&cl.pub.days[cl.day])html+=`<div class="card"><div class="slots">${cl.pub.days[cl.day].map(t=>`<button data-t="${t}" class="${cl.time===t?'on':''}">${t}</button>`).join('')}</div></div>`;
-    if(cl.day&&cl.time)html+=`<div class="card"><h2 style="margin-top:0">Tus datos</h2><div class="row" style="flex-direction:column;align-items:stretch"><input id="nm" placeholder="Nombre" autocomplete="name"><input id="sv" placeholder="Servicio (ej. manicura sencilla, semipermanente)" maxlength="100"><input id="em" type="email" placeholder="Correo electrónico (obligatorio)" autocomplete="email" required><input id="ph" type="tel" placeholder="WhatsApp / celular" autocomplete="tel"><button class="p" id="ok">Confirmar ${cl.time}</button><div class="mut" id="msg"></div></div></div>`;
+    if(cl.day&&cl.time)html+=`<div class="card"><h2 style="margin-top:0">Tus datos</h2><div class="row" style="flex-direction:column;align-items:stretch"><input id="nm" placeholder="Nombre" autocomplete="name">${hasSvc?'':'<input id="sv" placeholder="Servicio (ej. corte + barba, cejas, uñas acrílicas)" maxlength="100">'}<input id="em" type="email" placeholder="Correo electrónico (obligatorio)" autocomplete="email" required><input id="ph" type="tel" placeholder="WhatsApp / celular" autocomplete="tel"><button class="p" id="ok">Confirmar ${cl.time}</button><div class="mut" id="msg"></div></div></div>`;
   }
   app.innerHTML=html;
   const redraw=()=>{const y=scrollY;client().then(()=>scrollTo(0,y))};
+  if($('chgp'))$('chgp').onclick=()=>{cl.pro=null;cl.svc=null;cl.day=null;cl.time=null;client()};
+  if($('chg'))$('chg').onclick=()=>{cl.svc=null;cl.day=null;cl.time=null;client()};
   app.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{cl.day=b.dataset.d;cl.time=null;redraw()});
   app.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{cl.time=b.dataset.t;client().then(()=>{const f=$('nm');f&&f.scrollIntoView({behavior:'smooth',block:'center'})})});
   if($('ok'))$('ok').onclick=async()=>{
-    const name=$('nm').value.trim(),service=$('sv').value.trim(),email=$('em').value.trim(),phone=$('ph').value.trim();
-    if(service.length<2){$('msg').textContent='Escribe el servicio que te vas a hacer.';return}
+    const name=$('nm').value.trim(),service=$('sv')?$('sv').value.trim():'',email=$('em').value.trim(),phone=$('ph').value.trim();
+    if(!hasSvc&&service.length<2){$('msg').textContent='Escribe el servicio que te vas a hacer.';return}
     if(!name||phone.length<7){$('msg').textContent='Escribe tu nombre y un celular válido.';return}
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)){$('msg').textContent='Escribe un correo electrónico válido.';return}
     $('ok').disabled=true;$('ok').textContent='Confirmando…';
-    try{cl.done=await api('/book',{method:'POST',body:JSON.stringify({date:cl.day,time:cl.time,name,service,phone,email})});client()}
+    try{cl.done=await api('/book',{method:'POST',body:JSON.stringify({date:cl.day,time:cl.time,name,phone,email,...(multi?{pro:cl.pro}:{}),...(hasSvc?{service_id:cl.svc}:{service})})});client()}
     catch(e){alert(e.message);cl.time=null;client()}
   };
 }
 
 /* ---------- BARBERO / ADMIN ---------- */
-let ad={tab:'agenda',view:'week',cur:new Date(),hwk:iso(mon(new Date()))};
+let ad={pro:null,tab:'agenda',view:'week',cur:new Date(),hwk:iso(mon(new Date()))};
+function profBar(){
+  if(S.role==='admin'&&S.pros.length>1)return `<div class="seg" style="margin-bottom:10px">${S.pros.map(p=>`<button data-pro="${p.id}" class="${ad.pro===p.id?'on':''}">${esc(p.name)}</button>`).join('')}</div>`;
+  if(S.role==='pro')return `<div class="mut" style="margin:-4px 0 10px">Agenda de <b>${esc(S.proName)}</b></div>`;
+  return '';
+}
 function admin(){
   const tabs=`<div class="tab"><button data-tab="agenda" class="${ad.tab==='agenda'?'on':''}">📅 Agenda</button><button data-tab="horario" class="${ad.tab==='horario'?'on':''}">🕒 Horario y link</button></div>`;
-  app.innerHTML=`<h1>${esc(CFG.icon)} ${esc(CFG.name||'Mi agenda')}</h1>${tabs}<div id="body"></div>`;
-  app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ad.tab=b.dataset.tab;ad.form=null;ad.addrOpen=false;admin()});
+  app.innerHTML=`<h1>${esc(CFG.icon)} ${esc(CFG.name||'Mi agenda')}</h1>${profBar()}${tabs}<div id="body"></div><div style="text-align:center"><button class="ghost" id="logout">Cerrar sesión</button></div>`;
+  app.querySelectorAll('[data-pro]').forEach(b=>b.onclick=async()=>{ad.pro=b.dataset.pro;ad.form=null;ad.addrOpen=false;ad.svcOpen=false;ad.svcEdit=null;try{await load()}catch(e){}admin()});
+  $('logout').onclick=()=>{localStorage.removeItem('akey');location.reload()};
+  app.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ad.tab=b.dataset.tab;ad.form=null;ad.addrOpen=false;ad.svcOpen=false;ad.svcEdit=null;admin()});
   ad.tab==='agenda'?agenda($('body')):horario($('body'));
 }
 function agenda(box){
@@ -128,25 +144,50 @@ function agenda(box){
     h+='</div>';
   }else if(v==='week'){
     h+=`<div class="card">`+[...Array(7)].map((_,i)=>{const d=add(mon(c),i),L=bks(d);
-      return `<div class="item" data-go="${iso(d)}" style="cursor:pointer"><div><b>${DN[d.getDay()]} ${d.getDate()}</b><div class="mut">${L.length?L.map(b=>b.time+' '+esc(b.name)+(b.service?' ('+esc(b.service)+')':'')).join(' · '):(slotsFor(d).length?'Libre':'Sin atención')}</div></div><span class="mut">›</span></div>`}).join('')+`</div>`;
+      return `<div class="item" data-go="${iso(d)}" style="cursor:pointer"><div><b>${DN[d.getDay()]} ${d.getDate()}</b><div class="mut">${L.length?L.map(b=>b.time+' '+esc(b.name)+(b.service?' ('+esc(b.service)+')':'')).join(' · '):(dayOn(d)?'Libre':'Sin atención')}</div></div><span class="mut">›</span></div>`}).join('')+`</div>`;
   }else{
-    const L=bks(c),sl=slotsFor(c,true),times=[...new Set([...sl,...L.map(b=>b.time)])].sort();
-    h+=`<div class="card">`+(times.length?times.map(t=>{const b=L.find(x=>x.time===t);
-      if(b)return `<div class="item"><div><b>${t}</b> <span>${esc(b.name)}</span>${b.service?`<div>${esc(CFG.icon)} ${esc(b.service)}</div>`:''}${b.phone||b.email?`<div class="mut">${b.phone?`<a href="https://wa.me/${wa(b.phone)}" target="_blank" rel="noopener">${esc(b.phone)}</a>`:''}${b.phone&&b.email?' · ':''}${b.email?esc(b.email):''}</div>`:''}</div><button class="d" data-del="${b.id}">Cancelar</button></div>`;
-      if(ad.form===t)return `<div class="item" style="flex-direction:column;align-items:stretch"><b>${t}</b><input id="mn" placeholder="Nombre del cliente"><input id="ms" placeholder="Servicio (opcional)" maxlength="100"><input id="mp" type="tel" placeholder="Celular (opcional)"><div class="row"><button class="p" data-save="${t}">Guardar</button><button data-cancel="1">Cancelar</button></div></div>`;
-      return `<div class="item"><div><b>${t}</b> <span class="free">Libre</span></div><div class="row"><button data-new="${t}">Agendar</button><button data-blk="${t}">Bloquear</button></div></div>`}).join(''):'<div class="mut">Sin horario este día.</div>')+`</div>`;
+    h+=`<div class="card" id="dayc"></div>`;
   }
   box.innerHTML=h;
   box.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{ad.view=b.dataset.v;admin()});
   box.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ad.cur=parse(b.dataset.go);ad.view='day';ad.form=null;admin()});
-  box.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{if(confirm('¿Cancelar esta cita?')){await api('/admin/booking/'+b.dataset.del,{method:'DELETE'});await load();admin()}});
-  box.querySelectorAll('[data-new]').forEach(b=>b.onclick=()=>{ad.form=b.dataset.new;admin();setTimeout(()=>{const i=$('mn');i&&i.focus()},0)});
-  box.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>{ad.form=null;admin()});
-  const addB=async(time,extra)=>{try{await api('/admin/booking',{method:'POST',body:JSON.stringify({date:iso(c),time,...extra})});ad.form=null;await load();admin()}catch(e){alert(e.message)}};
-  box.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>{const name=$('mn').value.trim();if(name.length<2){alert('Escribe el nombre del cliente');return}addB(b.dataset.save,{name,service:$('ms').value.trim(),phone:$('mp').value.trim()})});
-  box.querySelectorAll('[data-blk]').forEach(b=>b.onclick=()=>addB(b.dataset.blk,{block:true}));
+  if(v==='day')dayView(c);
   const step=n=>{const x=new Date(c);v==='month'?x.setMonth(x.getMonth()+n):x.setDate(x.getDate()+n*(v==='week'?7:1));ad.cur=x;ad.form=null;admin()};
   $('pv').onclick=()=>step(-1);$('nx').onclick=()=>step(1);
+}
+let daySeq=0;
+function dayView(c){
+  const seq=++daySeq,L=bks(c),box=$('dayc');let free=null;
+  const contact=b=>b.phone||b.email?`<div class="mut">${b.phone?`<a href="https://wa.me/${wa(b.phone)}" target="_blank" rel="noopener">${esc(b.phone)}</a>`:''}${b.phone&&b.email?' · ':''}${b.email?esc(b.email):''}</div>`:'';
+  const apptRow=b=>`<div class="item"><div><b>${b.time}–${hm(tm(b.time)+(b.dur||S.dur))}</b> <span>${esc(b.name)}</span>${b.service&&b.service_id!=='block'?`<div>${esc(CFG.icon)} ${esc(b.service)}${b.price>0?' · '+money(b.price):''}</div>`:''}${contact(b)}</div><button class="d" data-del="${b.id}">${b.service_id==='block'?'Quitar':'Cancelar'}</button></div>`;
+  const freeRow=r=>{
+    if(ad.form===r.t){
+      const opts=r.svc.filter(id=>id!=='-').map(id=>{const x=S.services.find(y=>y.id===id);return x?`<option value="${x.id}">${esc(x.name)} · ${x.dur} min${x.price>0?' · '+money(x.price):''}</option>`:''}).join('');
+      return `<div class="item" style="flex-direction:column;align-items:stretch"><b>${r.t}</b>${opts?`<select id="mv">${opts}</select>`:'<input id="ms" placeholder="Servicio (opcional)" maxlength="100">'}<input id="mn" placeholder="Nombre del cliente"><input id="mp" type="tel" placeholder="Celular (opcional)"><div class="row"><button class="p" data-save="${r.t}">Guardar</button><button data-cancel="1">Cancelar</button></div></div>`;
+    }
+    return `<div class="item"><div><b>${r.t}</b> <span class="free">Libre</span></div><div class="row">${r.svc.length?`<button data-new="${r.t}">Agendar</button>`:''}${r.block?`<button data-blk="${r.t}">Bloquear</button>`:''}</div></div>`;
+  };
+  const addB=async(time,extra)=>{try{await api('/admin/booking',{method:'POST',body:JSON.stringify({date:iso(c),time,...extra})});ad.form=null;await load();admin()}catch(e){alert(e.message)}};
+  const draw=()=>{
+    const items=[...L.map(b=>({t:b.time,b})),...(free?free.rows.map(r=>({t:r.t,r})):[])].sort((x,y)=>x.t<y.t?-1:x.t>y.t?1:0);
+    box.innerHTML=items.length?items.map(it=>it.b?apptRow(it.b):freeRow(it.r)).join(''):`<div class="mut">${free?'Sin horario este día.':'Cargando…'}</div>`;
+    box.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{if(confirm('¿Cancelar esta cita?')){await api('/admin/booking/'+b.dataset.del,{method:'DELETE'});await load();admin()}});
+    box.querySelectorAll('[data-new]').forEach(b=>b.onclick=()=>{ad.form=b.dataset.new;draw();const i=$('mn');i&&i.focus()});
+    box.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>{ad.form=null;draw()});
+    box.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>{const name=$('mn').value.trim();if(name.length<2){alert('Escribe el nombre del cliente');return}addB(b.dataset.save,{name,phone:$('mp').value.trim(),...($('mv')?{service_id:$('mv').value}:{service:$('ms')?$('ms').value.trim():''})})});
+    box.querySelectorAll('[data-blk]').forEach(b=>b.onclick=()=>addB(b.dataset.blk,{block:true}));
+  };
+  draw();
+  api('/admin/free?date='+iso(c)).then(f=>{if(seq!==daySeq)return;free=f;draw()}).catch(()=>{});
+}
+const DURS=[15,20,30,40,45,50,60,75,90,105,120,150,180];
+function svcPanel(){
+  if(!ad.svcOpen)return `<button class="ghost" id="svcb">${esc(CFG.icon||'🛠️')} Servicios</button>${S.services.length?`<div class="mut" style="font-size:12px">${S.services.length} servicio${S.services.length>1?'s':''}</div>`:''}`;
+  const e=ad.svcEdit,cur=e&&e!=='new'?S.services.find(x=>x.id===e):null,durs=[...new Set([...DURS,...(cur?[cur.dur]:[])])].sort((a,b)=>a-b);
+  return `<div class="card" style="text-align:left"><b>Servicios</b><div class="mut" style="margin:2px 0 8px">Lo que ofreces, con su precio y duración. El cliente elige uno antes de ver los horarios.</div>`
+   +(S.services.length?S.services.map(x=>`<div class="item"><div><b>${esc(x.name)}</b><div class="mut">${x.price>0?money(x.price)+' · ':''}${x.dur} min</div></div><div class="row"><button data-se="${x.id}">Editar</button><button class="d" data-sd="${x.id}">Quitar</button></div></div>`).join(''):'<div class="mut">Aún no tienes servicios. Sin servicios, el cliente escribe lo que quiere y todas las citas duran lo mismo.</div>')
+   +(e?`<div class="item" style="flex-direction:column;align-items:stretch"><input id="sn" placeholder="Nombre (ej. Corte clásico)" maxlength="60" value="${esc(cur?cur.name:'')}"><input id="sp" type="number" inputmode="numeric" min="0" step="1000" placeholder="Precio en pesos (ej. 25000)" value="${cur?cur.price:''}"><select id="sdur">${durs.map(m=>`<option value="${m}" ${(cur?cur.dur:45)===m?'selected':''}>${m} min</option>`).join('')}</select><div class="row"><button class="p" id="ssave">Guardar</button><button id="scancel">Cancelar</button></div></div>`:`<div style="margin-top:8px"><button id="sadd">＋ Agregar servicio</button></div>`)
+   +`<div class="row" style="margin-top:12px"><span class="mut">Pausa entre citas</span><select id="buf" style="width:auto">${[0,5,10,15,20,30].map(m=>`<option value="${m}" ${S.buffer===m?'selected':''}>${m} min</option>`).join('')}</select></div><div class="mut" style="font-size:12px;margin-top:4px">Se suma al final de cada cita para que descanses; el cliente no la ve. Las citas empiezan cada 30 minutos.</div><div style="margin-top:10px;text-align:center"><button class="ghost" id="svclose">Cerrar</button></div></div>`;
 }
 function horario(box){
   const wk=parse(ad.hwk),cfg=weekCfg(ad.hwk),link=location.origin+'/';
@@ -155,9 +196,9 @@ function horario(box){
     h+=`<div class="dayrow"><button data-on="${i}" class="${c.on?'on':''}">${DN[i]}</button><input type="time" data-f="${i}" value="${c.f}" ${c.on?'':'disabled'}><input type="time" data-t="${i}" value="${c.t}" ${c.on?'':'disabled'}></div>`}
   const br=cfg.br||(cfg.br={on:false,f:'13:00',t:'14:00'});
   h+=`<div class="dayrow br" style="margin-top:8px"><button data-br class="${br.on?'on':''}">☕ Descanso</button><input type="time" data-bf value="${br.f}" ${br.on?'':'disabled'}><input type="time" data-bt value="${br.t}" ${br.on?'':'disabled'}></div><div class="mut" style="margin-bottom:8px">El descanso aplica a todos los días de esta semana.</div>`;
-  h+=`<div class="row" style="margin-top:8px"><span class="mut">Duración por cita</span><select id="dur" style="width:auto">${[20,30,45,60,90].map(m=>`<option ${S.dur===m?'selected':''} value="${m}">${m} min</option>`).join('')}</select></div></div>
+  h+=`${S.services.length?'':`<div class="row" style="margin-top:8px"><span class="mut">Duración por cita</span><select id="dur" style="width:auto">${[20,30,45,60,90].map(m=>`<option ${S.dur===m?'selected':''} value="${m}">${m} min</option>`).join('')}</select></div>`}</div>
   <div class="card"><b>Link para tus clientes</b><div class="link">${esc(link)}</div><div class="row"><button class="p" id="cp">Copiar link</button><button id="wa">Enviar por WhatsApp</button></div><p class="mut" style="margin-bottom:0">Muestra esta semana y la siguiente, y se actualiza solo: puedes enviar siempre el mismo link. Solo verán los días y horas que dejaste activos. Las semanas nuevas copian el horario de la anterior, así que revisa también la semana siguiente.</p></div>
-  <div style="text-align:center;margin-bottom:8px">${ad.addrOpen?`<div class="card" style="text-align:left"><b>Dirección</b><input id="addrin" style="margin-top:8px" placeholder="Ej. Calle 5 #10-20, Cali" maxlength="200" value="${esc(S.address||'')}"><div class="mut" style="margin:6px 0 10px">Aparece en el correo de confirmación que recibe el cliente.</div><div class="row"><button class="p" id="adsave">Guardar</button><button id="adcancel">Cancelar</button></div></div>`:`<button class="ghost" id="addr">📍 Modificar dirección</button>${S.address?`<div class="mut" style="font-size:12px">${esc(S.address)}</div>`:''}`}</div>`;
+  <div style="text-align:center;margin-bottom:8px">${S.servicesOn&&S.role==='admin'?svcPanel():''}${S.role!=='admin'?'':ad.addrOpen?`<div class="card" style="text-align:left"><b>Dirección</b><input id="addrin" style="margin-top:8px" placeholder="Ej. Calle 5 #10-20, Cali" maxlength="200" value="${esc(S.address||'')}"><div class="mut" style="margin:6px 0 10px">Aparece en el correo de confirmación que recibe el cliente.</div><div class="row"><button class="p" id="adsave">Guardar</button><button id="adcancel">Cancelar</button></div></div>`:`<button class="ghost" id="addr">📍 Modificar dirección</button>${S.address?`<div class="mut" style="font-size:12px">${esc(S.address)}</div>`:''}`}</div>`;
   box.innerHTML=h;
   const put=async()=>{S.weeks[ad.hwk]=cfg;await api('/admin/week/'+ad.hwk,{method:'PUT',body:JSON.stringify(cfg)})};
   box.querySelectorAll('[data-on]').forEach(b=>b.onclick=async()=>{const c=cfg.d[b.dataset.on];c.on=!c.on;await put();horario(box)});
@@ -169,9 +210,24 @@ function horario(box){
   if($('addr'))$('addr').onclick=()=>{ad.addrOpen=true;horario(box);setTimeout(()=>{const i=$('addrin');i&&i.focus()},0)};
   if($('adcancel'))$('adcancel').onclick=()=>{ad.addrOpen=false;horario(box)};
   if($('adsave'))$('adsave').onclick=async()=>{const v=$('addrin').value.trim();try{await api('/admin/address',{method:'PUT',body:JSON.stringify({address:v})});S.address=v;ad.addrOpen=false;horario(box)}catch(e){alert(e.message)}};
-  $('dur').onchange=async e=>{S.dur=+e.target.value;await api('/admin/dur',{method:'PUT',body:JSON.stringify({dur:S.dur})})};
+  if($('svcb'))$('svcb').onclick=()=>{ad.svcOpen=true;horario(box)};
+  if($('svclose'))$('svclose').onclick=()=>{ad.svcOpen=false;ad.svcEdit=null;horario(box)};
+  if($('sadd'))$('sadd').onclick=()=>{ad.svcEdit='new';horario(box);setTimeout(()=>{const i=$('sn');i&&i.focus()},0)};
+  if($('scancel'))$('scancel').onclick=()=>{ad.svcEdit=null;horario(box)};
+  box.querySelectorAll('[data-se]').forEach(b=>b.onclick=()=>{ad.svcEdit=b.dataset.se;horario(box)});
+  box.querySelectorAll('[data-sd]').forEach(b=>b.onclick=async()=>{if(confirm('¿Quitar este servicio? Las citas ya agendadas se conservan.')){try{await api('/admin/service/'+b.dataset.sd,{method:'DELETE'});await load();ad.svcEdit=null;horario(box)}catch(e){alert(e.message)}}});
+  if($('ssave'))$('ssave').onclick=async()=>{const name=$('sn').value.trim(),price=Math.round(Number($('sp').value||0)),dur=+$('sdur').value;if(name.length<2){alert('Escribe el nombre del servicio');return}const isNew=ad.svcEdit==='new';try{await api(isNew?'/admin/service':'/admin/service/'+ad.svcEdit,{method:isNew?'POST':'PUT',body:JSON.stringify({name,price,dur})});await load();ad.svcEdit=null;horario(box)}catch(e){alert(e.message)}};
+  if($('buf'))$('buf').onchange=async e=>{S.buffer=+e.target.value;try{await api('/admin/buffer',{method:'PUT',body:JSON.stringify({buffer:S.buffer})})}catch(err){alert(err.message)}};
+  if($('dur'))$('dur').onchange=async e=>{S.dur=+e.target.value;await api('/admin/dur',{method:'PUT',body:JSON.stringify({dur:S.dur})})};
   $('pw').onclick=()=>{ad.hwk=iso(add(wk,-7));horario(box)};$('nw').onclick=()=>{ad.hwk=iso(add(wk,7));horario(box)};
-  $('cp').onclick=async()=>{try{await navigator.clipboard.writeText(link);$('cp').textContent='¡Copiado!'}catch(e){$('cp').textContent='Copia el texto de arriba'}};
+  $('cp').onclick=async()=>{
+    const b=$('cp'),txt=b.textContent;let ok=false;
+    try{await navigator.clipboard.writeText(link);ok=true}catch(e){}
+    if(!ok){try{const ta=document.createElement('textarea');ta.value=link;ta.setAttribute('readonly','');ta.style.cssText='position:fixed;top:0;left:0;opacity:0';document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,link.length);ok=document.execCommand('copy');ta.remove()}catch(e){}}
+    if(!ok){const r=document.createRange();r.selectNodeContents(box.querySelector('.link'));const g=getSelection();g.removeAllRanges();g.addRange(r)}
+    b.textContent=ok?'¡Copiado!':'Link seleccionado: cópialo';
+    setTimeout(()=>{b.textContent=txt},2500);
+  };
   $('wa').onclick=()=>window.open('https://wa.me/?text='+encodeURIComponent('Agenda tu cita aquí 👇\n'+link),'_blank','noopener');
 }
 
@@ -183,9 +239,9 @@ paintTg();
   try{CFG=await(await fetch('/api/config')).json();document.title=CFG.name||'Agenda de citas'}catch(e){}
   if(location.pathname!=='/admin'){client();return}
   for(;;){
-    if(!KEY){KEY=prompt('Contraseña de administrador')||'';if(!KEY){app.innerHTML='<div class="card">Acceso requerido. Recarga la página.</div>';return}}
+    if(!KEY){KEY=prompt('Contraseña')||'';if(!KEY){app.innerHTML='<div class="card">Acceso requerido. Recarga la página.</div>';return}}
     try{await load();break}catch(e){if(e.status!==401){app.innerHTML='<div class="card">Error de conexión.</div>';return}alert('Contraseña incorrecta')}
   }
-  localStorage.setItem('akey',KEY);admin();
+  localStorage.setItem('akey',KEY);ad.pro=S.pro;admin();
 })();
 </script></body></html>
