@@ -14,6 +14,7 @@ const PORT = process.env.PORT || 3000;
 // (nombre:contraseña:correo — el correo es opcional). El orden fija la identidad (p1, p2, p3): no lo cambies.
 // MAX_PROFESSIONALS (por defecto 3) es el límite del contrato. ENABLE_SERVICES=true activa los servicios (proyecto salón).
 const MAX_PROS = Number(process.env.MAX_PROFESSIONALS) || 3;
+const AHEAD = Number(process.env.BOOKING_DAYS_AHEAD) || 61; // cuántos días hacia adelante se puede agendar (61 ≈ 2 meses)
 const SERVICES_ON = String(process.env.ENABLE_SERVICES || '').toLowerCase() === 'true';
 const PRICES_ON = String(process.env.ENABLE_PRICES || '').toLowerCase() === 'true'; // precios: reservado para la versión beta
 const rawPros = (process.env.PROFESSIONALS || '').split(',').map(x => x.trim()).filter(Boolean);
@@ -160,7 +161,7 @@ const getAddress = () => db.prepare("SELECT v FROM settings WHERE k='address'").
 const getDur = (pro = 'p1') => Number(db.prepare('SELECT v FROM settings WHERE k=?').get('dur:' + pro)?.v) || Number(db.prepare("SELECT v FROM settings WHERE k='dur'").get()?.v) || 45;
 function weekCfg(pro, wk) {
   const q = db.prepare('SELECT cfg FROM weeks WHERE pro=? AND wk=?');
-  for (let i = 0; i <= 12; i++) { const r = q.get(pro, addD(wk, -7 * i)); if (r) return JSON.parse(r.cfg); }
+  for (let i = 0; i <= 30; i++) { const r = q.get(pro, addD(wk, -7 * i)); if (r) return JSON.parse(r.cfg); }
   const d = {}; for (let i = 0; i < 7; i++) d[i] = { on: i >= 1 && i <= 5, f: '09:00', t: '18:00' };
   return { d, br: { on: false, f: '13:00', t: '14:00' } };
 }
@@ -245,10 +246,14 @@ app.get('/api/public', (req, res) => {
     if (!s) return res.status(400).json({ error: 'Elige un servicio' });
     dur = s.dur;
   } else { dur = getDur(pro); step = dur; }
-  const wk = monday(DATE.test(req.query.week) ? req.query.week : toIso(nowCO()));
+  // Un mes completo, dentro de la ventana [hoy, hoy + AHEAD días]
+  const today = toIso(nowCO()), last = addD(today, AHEAD);
+  let month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : today.slice(0, 7);
+  if (month < today.slice(0, 7)) month = today.slice(0, 7);
+  if (month > last.slice(0, 7)) month = last.slice(0, 7);
   const days = {};
-  for (let i = 0; i < 14; i++) { const d = addD(wk, i); days[d] = starts(d, dur, { pro, step }); }
-  res.json({ week: wk, days });
+  for (let d = month + '-01'; d.slice(0, 7) === month; d = addD(d, 1)) if (d >= today && d <= last) days[d] = starts(d, dur, { pro, step });
+  res.json({ month, from: today, to: last, days });
 });
 
 // Público: reservar
@@ -260,6 +265,7 @@ app.post('/api/book', limit, async (req, res) => {
   const n = String(name || '').trim().slice(0, 60), p = String(phone || '').replace(/[^\d+]/g, '').slice(0, 20);
   if (!DATE.test(date) || !TIME.test(time) || n.length < 2 || p.length < 7 || !EMAIL.test(em))
     return res.status(400).json({ error: 'Datos inválidos' });
+  if (date > addD(toIso(nowCO()), AHEAD)) return res.status(409).json({ error: 'Todavía no hay agenda abierta para esa fecha' });
   const svcs = servicesFor(pro);
   let s = null, dur, step = STEP, sname, price = 0;
   if (activeServices().length) {
