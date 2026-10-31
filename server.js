@@ -15,6 +15,7 @@ const PORT = process.env.PORT || 3000;
 // MAX_PROFESSIONALS (por defecto 3) es el límite del contrato. ENABLE_SERVICES=true activa los servicios (proyecto salón).
 const MAX_PROS = Number(process.env.MAX_PROFESSIONALS) || 3;
 const SERVICES_ON = String(process.env.ENABLE_SERVICES || '').toLowerCase() === 'true';
+const PRICES_ON = String(process.env.ENABLE_PRICES || '').toLowerCase() === 'true'; // precios: reservado para la versión beta
 const rawPros = (process.env.PROFESSIONALS || '').split(',').map(x => x.trim()).filter(Boolean);
 if (rawPros.length > MAX_PROS) console.warn(`PROFESSIONALS tiene ${rawPros.length} profesionales; solo se usan los primeros ${MAX_PROS} (MAX_PROFESSIONALS).`);
 const PROS = rawPros.slice(0, MAX_PROS).map((x, i) => { const [name = '', pass = '', mail = ''] = x.split(':').map(t => t.trim()); return { id: 'p' + (i + 1), name, pass, mail }; }).filter(p => p.name);
@@ -76,6 +77,9 @@ if (db.pragma('user_version', { simple: true }) < 3) {
   })();
 }
 
+// Migración v4: cada servicio puede ser de todos los profesionales o solo de algunos.
+if (!db.prepare('PRAGMA table_info(services)').all().some(c => c.name === 'pros')) db.exec("ALTER TABLE services ADD COLUMN pros TEXT NOT NULL DEFAULT ''");
+
 /* ---- correo (SMTP) ---- */
 const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM } = process.env;
 const BUSINESS = process.env.BUSINESS_NAME || 'Agenda de citas';
@@ -110,7 +114,7 @@ async function sendConfirmation(b) {
   const { dia, hora } = cuandoDe(b), addr = getAddress();
   const aviso = addr ? `Te esperamos en ${addr}. Recuerda llegar 10 minutos antes.` : 'Recuerda llegar 10 minutos antes.';
   const body = `<p style="font-size:16px;line-height:1.5;margin:0 0 18px">Hola <b>${esc(b.name)}</b>, tu cita quedó agendada. Estos son los detalles:</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${b.pro ? fila('🧑', 'Profesional', esc(b.pro)) : ''}${fila(ICON || '💼', 'Servicio', esc(b.service) + (b.catalog ? ` <span style="font-weight:400;color:#8a919a">· ${b.dur} min</span>` : ''))}${b.price > 0 ? fila('💵', 'Valor', esc(money(b.price))) : ''}</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${b.pro ? fila('🧑', 'Profesional', esc(b.pro)) : ''}${fila(ICON || '💼', 'Servicio', esc(b.service) + (b.catalog ? ` <span style="font-weight:400;color:#8a919a">· aprox. ${ddur(b.dur)}</span>` : ''))}${b.price > 0 ? fila('💵', 'Valor', esc(money(b.price))) : ''}</table>
 <p style="font-size:15px;line-height:1.5;margin:22px 0 0;padding:14px 16px;background:#e8f3ef;border-radius:10px;color:#1f4d41">⏰ ${esc(aviso)}</p>
 ${addr ? `<div style="text-align:center;margin-top:22px">${boton('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr), '📍 Ver en el mapa')}</div>` : ''}
 <p style="font-size:14px;line-height:1.6;color:#6b7280;margin:22px 0 0;text-align:center">Si no puedes asistir, avísanos con tiempo.${PHONE ? `<br>¿Dudas? Comunícate al <a href="${waLink}" style="color:${ACCENT};font-weight:600">${esc(PHONE)}</a>` : ''}</p>`;
@@ -118,7 +122,7 @@ ${addr ? `<div style="text-align:center;margin-top:22px">${boton('https://www.go
     await mailer.sendMail({
       from: MAIL_FROM || SMTP_USER, to: b.email,
       subject: `Cita confirmada: ${dia} a las ${hora}`,
-      text: `¡Cita confirmada!\n\nHola ${b.name}, tu cita quedó agendada.\nFecha: ${cap(dia)}\nHora: ${hora}${b.pro ? `\nProfesional: ${b.pro}` : ''}\nServicio: ${b.service}${b.catalog ? ` (${b.dur} min)` : ''}${b.price > 0 ? `\nValor: ${money(b.price)}` : ''}${addr ? `\nLugar: ${addr}` : ''}\n\n${aviso}\nSi no puedes asistir, avísanos con tiempo.${PHONE ? `\n¿Dudas? Comunícate al ${PHONE}` : ''}\n\n${BUSINESS}\n${AUTO}`,
+      text: `¡Cita confirmada!\n\nHola ${b.name}, tu cita quedó agendada.\nFecha: ${cap(dia)}\nHora: ${hora}${b.pro ? `\nProfesional: ${b.pro}` : ''}\nServicio: ${b.service}${b.catalog ? ` (aprox. ${ddur(b.dur)})` : ''}${b.price > 0 ? `\nValor: ${money(b.price)}` : ''}${addr ? `\nLugar: ${addr}` : ''}\n\n${aviso}\nSi no puedes asistir, avísanos con tiempo.${PHONE ? `\n¿Dudas? Comunícate al ${PHONE}` : ''}\n\n${BUSINESS}\n${AUTO}`,
       html: shell(marca(), '¡Cita confirmada! ✅', body, esc(AUTO))
     });
     return true;
@@ -131,7 +135,7 @@ async function notifyOwner(b) {
   if (!mailer || !to) return;
   const { dia, hora } = cuandoDe(b);
   const body = `<p style="font-size:16px;line-height:1.5;margin:0 0 18px"><b>${esc(b.name)}</b> acaba de agendar una cita.</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${b.pro ? fila('🧑', 'Profesional', esc(b.pro)) : ''}${fila(ICON || '💼', 'Servicio', esc(b.service) + (b.catalog ? ` <span style="font-weight:400;color:#8a919a">· ${b.dur} min</span>` : ''))}${b.price > 0 ? fila('💵', 'Valor', esc(money(b.price))) : ''}${fila('📱', 'Celular', `<a href="https://wa.me/${waNum(b.phone)}" style="color:${ACCENT}">${esc(b.phone)}</a>`)}${fila('✉️', 'Correo', `<a href="mailto:${esc(b.email)}" style="color:${ACCENT}">${esc(b.email)}</a>`)}</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${fila('📅', 'Fecha', esc(cap(dia)))}${fila('🕐', 'Hora', esc(hora))}${b.pro ? fila('🧑', 'Profesional', esc(b.pro)) : ''}${fila(ICON || '💼', 'Servicio', esc(b.service) + (b.catalog ? ` <span style="font-weight:400;color:#8a919a">· aprox. ${ddur(b.dur)}</span>` : ''))}${b.price > 0 ? fila('💵', 'Valor', esc(money(b.price))) : ''}${fila('📱', 'Celular', `<a href="https://wa.me/${waNum(b.phone)}" style="color:${ACCENT}">${esc(b.phone)}</a>`)}${fila('✉️', 'Correo', `<a href="mailto:${esc(b.email)}" style="color:${ACCENT}">${esc(b.email)}</a>`)}</table>
 <div style="text-align:center;margin-top:24px">${boton('https://wa.me/' + waNum(b.phone), '💬 Escribirle por WhatsApp')}</div>`;
   try {
     await mailer.sendMail({
@@ -164,7 +168,10 @@ const STEP = 30;                       // las citas empiezan cada 30 minutos
 const TIME = /^\d{2}:\d{2}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const getBuffer = () => { const r = db.prepare("SELECT v FROM settings WHERE k='buffer'").get(); return r ? Number(r.v) : 10; };
-const activeServices = () => !SERVICES_ON ? [] : db.prepare('SELECT id,name,price,dur FROM services WHERE active=1 ORDER BY pos, rowid').all();
+const activeServices = () => !SERVICES_ON ? [] : db.prepare('SELECT id,name,price,dur,pros FROM services WHERE active=1 ORDER BY pos, rowid').all()
+  .map(x => ({ ...x, pros: x.pros ? x.pros.split(',') : [] }));
+const servicesFor = pro => activeServices().filter(x => !x.pros.length || x.pros.includes(pro));
+const ddur = m => m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
 
 // Horas de inicio posibles para una cita de `dur` minutos ese día.
 // - all=true incluye horas ya pasadas (el administrador puede registrar a alguien que ya llegó)
@@ -231,9 +238,9 @@ const publicPro = v => (proIds.length === 1 ? proIds[0] : (proIds.includes(v) ? 
 app.get('/api/public', (req, res) => {
   const pro = publicPro(req.query.pro);
   if (!pro) return res.status(400).json({ error: 'Elige un profesional' });
-  const svcs = activeServices();
+  const svcs = servicesFor(pro);
   let dur, step = STEP;
-  if (svcs.length) {
+  if (activeServices().length) {
     const s = svcs.find(x => x.id === req.query.service);
     if (!s) return res.status(400).json({ error: 'Elige un servicio' });
     dur = s.dur;
@@ -253,9 +260,9 @@ app.post('/api/book', limit, async (req, res) => {
   const n = String(name || '').trim().slice(0, 60), p = String(phone || '').replace(/[^\d+]/g, '').slice(0, 20);
   if (!DATE.test(date) || !TIME.test(time) || n.length < 2 || p.length < 7 || !EMAIL.test(em))
     return res.status(400).json({ error: 'Datos inválidos' });
-  const svcs = activeServices();
+  const svcs = servicesFor(pro);
   let s = null, dur, step = STEP, sname, price = 0;
-  if (svcs.length) {
+  if (activeServices().length) {
     s = svcs.find(x => x.id === service_id);
     if (!s) return res.status(400).json({ error: 'Elige un servicio' });
     dur = s.dur; sname = s.name; price = s.price;
@@ -281,7 +288,7 @@ app.get('/api/admin/state', auth, (req, res) => {
   for (const r of db.prepare('SELECT wk,cfg FROM weeks WHERE pro=?').all(pro)) weeks[r.wk] = JSON.parse(r.cfg);
   res.json({
     role: req.user.role, pros: PROS.map(p => ({ id: p.id, name: p.name })), pro, proName: proOf(pro)?.name || '',
-    servicesOn: SERVICES_ON, dur: getDur(pro), buffer: getBuffer(), address: getAddress(), services: activeServices(), weeks,
+    servicesOn: SERVICES_ON, pricesOn: PRICES_ON, dur: getDur(pro), buffer: getBuffer(), address: getAddress(), services: activeServices(), weeks,
     bookings: db.prepare("SELECT id,date,time,name,phone,email,service,service_id,price,dur,status FROM bookings WHERE pro=? AND status!='cancelada' ORDER BY date,time").all(pro)
   });
 });
@@ -307,29 +314,31 @@ app.put('/api/admin/dur', auth, (req, res) => {
 });
 app.put('/api/admin/buffer', auth, adminOnly, svcOn, (req, res) => {
   const v = Number(req.body?.buffer);
-  if (![0, 5, 10, 15, 20, 30].includes(v)) return res.status(400).json({ error: 'Pausa inválida' });
+  if (![0, 5, 10, 15, 20, 30, 45, 60].includes(v)) return res.status(400).json({ error: 'Pausa inválida' });
   setSetting('buffer', v);
   res.json({ ok: true });
 });
 
 // Servicios (proyecto salón; solo con ENABLE_SERVICES=true). Quitar = archivar.
 const svcBody = b => {
-  const name = String(b?.name || '').trim().slice(0, 60), price = Math.round(Number(b?.price ?? 0)), dur = Math.round(Number(b?.dur));
+  const name = String(b?.name || '').trim().slice(0, 60), dur = Math.round(Number(b?.dur));
+  const price = PRICES_ON ? Math.round(Number(b?.price ?? 0)) : 0;
   if (name.length < 2 || !Number.isFinite(price) || price < 0 || price > 10000000 || !Number.isFinite(dur) || dur < 10 || dur > 480) return null;
-  return { name, price, dur };
+  const pros = (Array.isArray(b?.pros) ? b.pros : []).filter(id => proIds.includes(id));
+  return { name, price, dur, pros: pros.length === proIds.length ? '' : pros.join(',') };
 };
 app.post('/api/admin/service', auth, adminOnly, svcOn, (req, res) => {
   const v = svcBody(req.body);
   if (!v) return res.status(400).json({ error: 'Datos del servicio inválidos' });
   if (activeServices().length >= 30) return res.status(400).json({ error: 'Máximo 30 servicios' });
   const pos = db.prepare('SELECT COALESCE(MAX(pos),0)+1 AS p FROM services').get().p;
-  db.prepare('INSERT INTO services(id,name,price,dur,pos) VALUES(?,?,?,?,?)').run(crypto.randomUUID().slice(0, 8), v.name, v.price, v.dur, pos);
+  db.prepare('INSERT INTO services(id,name,price,dur,pos,pros) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID().slice(0, 8), v.name, v.price, v.dur, pos, v.pros);
   res.json({ ok: true });
 });
 app.put('/api/admin/service/:id', auth, adminOnly, svcOn, (req, res) => {
   const v = svcBody(req.body);
   if (!v) return res.status(400).json({ error: 'Datos del servicio inválidos' });
-  db.prepare('UPDATE services SET name=?, price=?, dur=? WHERE id=? AND active=1').run(v.name, v.price, v.dur, req.params.id);
+  db.prepare('UPDATE services SET name=?, price=?, dur=?, pros=? WHERE id=? AND active=1').run(v.name, v.price, v.dur, v.pros, req.params.id);
   res.json({ ok: true });
 });
 app.delete('/api/admin/service/:id', auth, adminOnly, svcOn, (req, res) => {
@@ -341,9 +350,9 @@ app.delete('/api/admin/service/:id', auth, adminOnly, svcOn, (req, res) => {
 app.get('/api/admin/free', auth, (req, res) => {
   const date = req.query.date, pro = scope(req);
   if (!DATE.test(date)) return res.status(400).json({ error: 'Fecha inválida' });
-  const svcs = activeServices(), rows = new Map();
+  const svcs = servicesFor(pro), rows = new Map();
   const row = t => { if (!rows.has(t)) rows.set(t, { t, svc: [], block: false }); return rows.get(t); };
-  if (svcs.length) {
+  if (activeServices().length) {
     for (const s of svcs) for (const t of starts(date, s.dur, { pro, all: true })) row(t).svc.push(s.id);
     for (const t of starts(date, STEP, { pro, all: true, newBuf: 0 })) row(t).block = true;
   } else {
@@ -358,13 +367,13 @@ app.post('/api/admin/booking', auth, (req, res) => {
   const { date, time, name, phone, service, service_id, block } = req.body || {};
   const pro = scope(req);
   if (!DATE.test(date) || !TIME.test(time)) return res.status(400).json({ error: 'Datos inválidos' });
-  const svcs = activeServices();
+  const svcs = servicesFor(pro), hasSvc = activeServices().length > 0;
   let n, dur, step = STEP, sname = '', sid = null, price = 0, newBuf;
-  if (block) { n = '⛔ Bloqueado'; sid = 'block'; newBuf = 0; dur = svcs.length ? STEP : getDur(pro); if (!svcs.length) step = dur; }
+  if (block) { n = '⛔ Bloqueado'; sid = 'block'; newBuf = 0; dur = hasSvc ? STEP : getDur(pro); if (!hasSvc) step = dur; }
   else {
     n = String(name || '').trim().slice(0, 60);
     if (n.length < 2) return res.status(400).json({ error: 'Escribe el nombre del cliente' });
-    if (svcs.length) {
+    if (hasSvc) {
       const s = svcs.find(x => x.id === service_id);
       if (!s) return res.status(400).json({ error: 'Elige un servicio' });
       dur = s.dur; sname = s.name; sid = s.id; price = s.price;
